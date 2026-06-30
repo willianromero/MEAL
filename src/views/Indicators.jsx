@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, addWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye } from 'lucide-react';
+import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye, Plus } from 'lucide-react';
 
 export default function Indicators({ currentUser }) {
   const isViewer = currentUser?.role === 'viewer';
+  const isAdmin = currentUser?.role === 'admin';
 
   // Cargar datos reactivos locales
   const projects = useLiveQuery(() => db.projects.toArray()) || [];
+  const logframes = useLiveQuery(() => db.logframes.toArray()) || [];
   const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
 
   // Filtros
@@ -17,6 +19,7 @@ export default function Indicators({ currentUser }) {
   // Estados de edición e ingreso desagregado
   const [editingId, setEditingId] = useState(null);
   const [expandedDesgloseId, setExpandedDesgloseId] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Campos de desagregación del formulario activo
   const [gMale, setGMale] = useState(0);
@@ -37,16 +40,30 @@ export default function Indicators({ currentUser }) {
 
   const [formError, setFormError] = useState('');
 
+  // Formulario nuevo indicador (Pilar 1 - Monitoreo)
+  const [newIndProjectId, setNewIndProjectId] = useState('');
+  const [newIndLogframeId, setNewIndLogframeId] = useState('');
+  const [newIndCode, setNewIndCode] = useState('');
+  const [newIndName, setNewIndName] = useState('');
+  const [newIndUnit, setNewIndUnit] = useState('Participantes');
+  const [newIndBaseline, setNewIndBaseline] = useState(0);
+  const [newIndTarget, setNewIndTarget] = useState(10);
+  const [newIndError, setNewIndError] = useState('');
+
   const filteredIndicators = selectedProjectId === 'all'
     ? indicators
     : indicators.filter(ind => ind.project_id === selectedProjectId);
+
+  // Filtrar componentes del marco lógico según el proyecto del nuevo indicador
+  const filteredLogframesForNewInd = newIndProjectId
+    ? logframes.filter(lf => lf.project_id === newIndProjectId)
+    : [];
 
   const handleStartEdit = (ind) => {
     if (isViewer) return;
     setEditingId(ind.id);
     setFormError('');
 
-    // Cargar datos previos de desagregación si existen
     const des = ind.disaggregated_data || {};
     setGMale(des.gender?.male || 0);
     setGFemale(des.gender?.female || 0);
@@ -70,18 +87,15 @@ export default function Indicators({ currentUser }) {
     setFormError('');
   };
 
-  // El total se autocalcula sumando el género (Hombres + Mujeres + Otro)
   const calculatedTotal = gMale + gFemale + gOther;
 
   const handleSaveActual = async (indId) => {
     setFormError('');
 
-    // Validar coherencia metodológica de las desagregaciones (Pilar 1 - Monitoreo)
     const sumAge = aChildren + aYouth + aAdult + aElder;
     const sumEthnicity = eWayuu + eAfro + eLocal;
     const sumLocation = lMayapo + lElPajaro;
 
-    // Si hay un valor total > 0, exigimos que las otras desagregaciones sumen exactamente lo mismo
     if (calculatedTotal > 0) {
       if (sumAge !== calculatedTotal) {
         setFormError(`Coherencia de Edad fallida: la suma (${sumAge}) debe ser igual al total del avance (${calculatedTotal}).`);
@@ -110,13 +124,74 @@ export default function Indicators({ currentUser }) {
     };
 
     try {
-      // Actualizar IndexedDB
-      await db.indicators.update(indId, updatedData);
-      setEditingId(null);
-      await updatePendingCount();
+      const currentRecord = await db.indicators.get(indId);
+      if (currentRecord) {
+        const merged = { ...currentRecord, ...updatedData };
+        // Guardar actualizando firma (Pilar 3)
+        await db.indicators.put(merged);
+        // Actualizar firma del registro en IndexedDB
+        const keys = Object.keys(merged).sort();
+        const sorted = {};
+        keys.forEach(k => { if (k !== 'signature' && k !== 'sync_status') sorted[k] = merged[k]; });
+        const hash = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(sorted)));
+        const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        await db.indicators.update(indId, { ...updatedData, signature: hashHex });
+        setEditingId(null);
+        await updatePendingCount();
+      }
     } catch (err) {
       console.error('Error actualizando avance:', err);
       setFormError('Error al guardar en base de datos local.');
+    }
+  };
+
+  // Crear nuevo indicador (Pilar 1 - Monitoreo)
+  const handleCreateIndicator = async (e) => {
+    e.preventDefault();
+    setNewIndError('');
+
+    if (!newIndProjectId || !newIndLogframeId || !newIndCode || !newIndName) {
+      setNewIndError('Todos los campos con asterisco son obligatorios.');
+      return;
+    }
+
+    const newId = `ind-uuid-${Math.random().toString(36).substr(2, 9)}`;
+    const now = new Date().toISOString();
+
+    const newIndicator = {
+      id: newId,
+      project_id: newIndProjectId,
+      logframe_id: newIndLogframeId,
+      code: newIndCode,
+      name: newIndName,
+      unit: newIndUnit,
+      baseline: Number(newIndBaseline) || 0,
+      target: Number(newIndTarget) || 0,
+      actual: 0,
+      disaggregated_data: {
+        gender: { male: 0, female: 0, other: 0 },
+        age: { children: 0, youth: 0, adult: 0, elder: 0 },
+        ethnicity: { indigenous: 0, afrodescendant: 0, local: 0 },
+        location: { Mayapo: 0, ElPajaro: 0 }
+      },
+      updated_at: now
+    };
+
+    try {
+      // Guardar indicador con firma criptográfica SHA-256 (Pilar 3)
+      await addWithSignature(db.indicators, newIndicator);
+      
+      setNewIndCode('');
+      setNewIndName('');
+      setNewIndUnit('Participantes');
+      setNewIndBaseline(0);
+      setNewIndTarget(10);
+      setShowAddForm(false);
+      await updatePendingCount();
+    } catch (err) {
+      console.error('Error creando indicador:', err);
+      setNewIndError('Error al guardar el indicador localmente.');
     }
   };
 
@@ -127,10 +202,132 @@ export default function Indicators({ currentUser }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* Cabecera */}
-      <div>
-        <h1>Indicadores de Monitoreo Territorial</h1>
-        <p>Registra y supervisa los logros físicos con desglose multidimensional y alertas automáticas de estancamiento.</p>
+      <div className="flex-between">
+        <div>
+          <h1>Indicadores de Monitoreo Territorial</h1>
+          <p>Registra y supervisa los logros físicos con desglose multidimensional y alertas automáticas de estancamiento.</p>
+        </div>
+
+        {isAdmin ? (
+          <button 
+            onClick={() => setShowAddForm(!showAddForm)} 
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            <Plus size={16} /> Nuevo Indicador
+          </button>
+        ) : null}
       </div>
+
+      {/* Formulario Agregar Indicador (Pilar 1) */}
+      {showAddForm && isAdmin && (
+        <div className="glass-panel" style={{ padding: '2rem' }}>
+          <h2 style={{ marginBottom: '1.25rem' }}>Definir Nuevo Indicador MEAL</h2>
+          
+          {newIndError && (
+            <div style={{ color: '#ef4444', fontSize: '0.85rem', fontWeight: 'bold', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.15)', marginBottom: '1rem' }}>
+              {newIndError}
+            </div>
+          )}
+
+          <form onSubmit={handleCreateIndicator} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+            <div className="form-group">
+              <label>Proyecto MEAL *</label>
+              <select 
+                value={newIndProjectId} 
+                onChange={(e) => {
+                  setNewIndProjectId(e.target.value);
+                  setNewIndLogframeId(''); // resetear nodo del marco lógico
+                }}
+                required
+              >
+                <option value="">-- Seleccionar Proyecto --</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Componente del Marco Lógico (Objetivo/Actividad) *</label>
+              <select 
+                value={newIndLogframeId} 
+                onChange={(e) => setNewIndLogframeId(e.target.value)}
+                required
+                disabled={!newIndProjectId}
+              >
+                <option value="">-- Seleccionar Componente --</option>
+                {filteredLogframesForNewInd.map(lf => (
+                  <option key={lf.id} value={lf.id}>[{lf.code}] {lf.description.substring(0, 50)}...</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Código del Indicador *</label>
+              <input 
+                type="text" 
+                placeholder="Ej: IND-1.2, IND-3.1" 
+                value={newIndCode}
+                onChange={e => setNewIndCode(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Unidad de Medida *</label>
+              <input 
+                type="text" 
+                placeholder="Ej: Personas, Asociaciones, Talleres" 
+                value={newIndUnit}
+                onChange={e => setNewIndUnit(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group" style={{ gridColumn: 'span 2' }}>
+              <label>Nombre / Formulación del Indicador *</label>
+              <input 
+                type="text" 
+                placeholder="Ej: Número de tripulaciones capacitadas en primeros auxilios..." 
+                value={newIndName}
+                onChange={e => setNewIndName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Línea Base (Baseline)</label>
+              <input 
+                type="number" 
+                min="0"
+                value={newIndBaseline}
+                onChange={e => setNewIndBaseline(parseInt(e.target.value) || 0)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Meta Objetivo (Target) *</label>
+              <input 
+                type="number" 
+                min="1"
+                value={newIndTarget}
+                onChange={e => setNewIndTarget(parseInt(e.target.value) || 1)}
+                required
+              />
+            </div>
+
+            <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <button type="button" onClick={() => setShowAddForm(false)} className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}>
+                Guardar Indicador
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Barra de Filtros */}
       <div className="glass-panel" style={{ padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -167,18 +364,16 @@ export default function Indicators({ currentUser }) {
             const isEditing = editingId === ind.id;
             const isSynced = ind.sync_status !== 'pending_sync';
 
-            // 1. Detección de Estancamiento (>30 días sin actualizaciones e incompleto)
+            // Detección de Estancamiento
             const lastUpdated = new Date(ind.updated_at).getTime();
             const nowTime = Date.now();
             const daysSinceUpdate = Math.floor((nowTime - lastUpdated) / (1000 * 60 * 60 * 24));
             const isEstancado = ind.actual < ind.target && daysSinceUpdate > 30;
 
-            // 2. Porcentaje de avance
             const rawPct = ind.target > 0 ? (ind.actual / ind.target) * 100 : 0;
             const pct = Math.round(rawPct);
             const barPct = rawPct > 100 ? 100 : rawPct;
 
-            // 3. Varianza (Desviación)
             const varianzaVal = ind.target - ind.actual;
             const pctVarianza = Math.round((varianzaVal / ind.target) * 100);
 
@@ -202,7 +397,7 @@ export default function Indicators({ currentUser }) {
                   background: isEstancado ? 'rgba(239, 68, 68, 0.01)' : 'rgba(255,255,255,0.01)'
                 }}
               >
-                {/* 1. Alerta de Estancamiento (Pilar 1) */}
+                {/* Alerta de Estancamiento */}
                 {isEstancado && (
                   <div 
                     style={{ 
@@ -256,13 +451,12 @@ export default function Indicators({ currentUser }) {
                   </div>
                 </div>
 
-                {/* Métricas y Varianza (Pilar 1) */}
+                {/* Métricas y Varianza */}
                 <div className="flex-between" style={{ flexWrap: 'wrap', gap: '1rem', background: 'rgba(255,255,255,0.01)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.02)' }}>
                   <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
                     <div>Línea Base: <strong style={{ color: 'var(--text-primary)' }}>{ind.baseline}</strong></div>
                     <div>Meta Física: <strong style={{ color: 'var(--text-primary)' }}>{ind.target} {ind.unit}</strong></div>
                     
-                    {/* Varianza Metodológica */}
                     <div style={{ borderLeft: '1px solid var(--border-glass)', paddingLeft: '1.5rem' }}>
                       Varianza: {' '}
                       <strong style={{ color: varianzaVal > 0 ? 'var(--secondary-light)' : '#10b981' }}>
@@ -295,7 +489,7 @@ export default function Indicators({ currentUser }) {
                   </div>
                 </div>
 
-                {/* PANEL DE DESGLOSE DEMOGRÁFICO/TERRITORIAL (Pilar 1 - Monitoreo) */}
+                {/* PANEL DE DESGLOSE DEMOGRÁFICO/TERRITORIAL */}
                 {isDesgloseOpen && (
                   <div 
                     className="glass-card" 
@@ -345,7 +539,7 @@ export default function Indicators({ currentUser }) {
                   </div>
                 )}
 
-                {/* FORMULARIO AVANZADO DE INGRESO DESAGREGADO (Pilar 1 - Monitoreo) */}
+                {/* FORMULARIO AVANZADO DE INGRESO DESAGREGADO */}
                 {isEditing && (
                   <div className="glass-card" style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                     <h4 style={{ color: 'var(--primary-light)', margin: 0, fontSize: '0.95rem' }}>Ingreso Multidimensional Desagregado</h4>

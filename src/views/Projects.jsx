@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, addWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play } from 'lucide-react';
+import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play, Save, Plus } from 'lucide-react';
 
 export default function Projects({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -15,12 +15,19 @@ export default function Projects({ currentUser }) {
   // Estados de vista
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAddNodeForm, setShowAddNodeForm] = useState(false);
 
   // Formulario nuevo proyecto
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  // Formulario nuevo nodo del marco lógico (Pilar 2)
+  const [nodeType, setNodeType] = useState('outcome');
+  const [nodeCode, setNodeCode] = useState('');
+  const [nodeDescription, setNodeDescription] = useState('');
+  const [nodeParentId, setNodeParentId] = useState('');
 
   const activeProject = projects.find(p => p.id === selectedProjectId) || projects[0];
 
@@ -43,15 +50,16 @@ export default function Projects({ currentUser }) {
     };
 
     try {
-      await db.projects.add(newProject);
+      // Guardar proyecto con firma criptográfica
+      await addWithSignature(db.projects, newProject);
       
-      // Auto crear estructura base de 4 niveles por defecto
+      // Auto crear estructura base de 4 niveles por defecto con firmas
       const impactId = `lf-uuid-imp-${Math.random().toString(36).substr(2, 5)}`;
       const outcomeId = `lf-uuid-out-${Math.random().toString(36).substr(2, 5)}`;
       const outputId = `lf-uuid-otp-${Math.random().toString(36).substr(2, 5)}`;
       const activityId = `lf-uuid-act-${Math.random().toString(36).substr(2, 5)}`;
 
-      await db.logframes.bulkAdd([
+      const baseNodes = [
         {
           id: impactId,
           project_id: newId,
@@ -88,7 +96,11 @@ export default function Projects({ currentUser }) {
           parent_id: outputId,
           updated_at: now
         }
-      ]);
+      ];
+
+      for (const node of baseNodes) {
+        await addWithSignature(db.logframes, node);
+      }
 
       // Resetear formulario
       setName('');
@@ -103,6 +115,39 @@ export default function Projects({ currentUser }) {
     }
   };
 
+  // Agregar un nodo personalizado al marco lógico (Outcomes, Outputs, Activities)
+  const handleAddLogframeNode = async (e) => {
+    e.preventDefault();
+    if (!isAdmin || !activeProject) return;
+    if (!nodeCode || !nodeDescription) return;
+
+    const newId = `lf-uuid-${nodeType}-${Math.random().toString(36).substr(2, 5)}`;
+    const now = new Date().toISOString();
+
+    const newNode = {
+      id: newId,
+      project_id: activeProject.id,
+      type: nodeType,
+      code: nodeCode,
+      parent_id: nodeType === 'impact' ? null : (nodeParentId || null),
+      description: nodeDescription,
+      updated_at: now
+    };
+
+    try {
+      // Guardar con firmado criptográfico SHA-256 (Pilar 3)
+      await addWithSignature(db.logframes, newNode);
+      
+      setNodeCode('');
+      setNodeDescription('');
+      setNodeParentId('');
+      setShowAddNodeForm(false);
+      await updatePendingCount();
+    } catch (err) {
+      console.error('Error agregando componente de matriz:', err);
+    }
+  };
+
   // Filtrar marco lógico del proyecto activo
   const projectLogframes = activeProject 
     ? logframes.filter(lf => lf.project_id === activeProject.id)
@@ -110,6 +155,20 @@ export default function Projects({ currentUser }) {
 
   // Extraer los elementos raíz del Marco Lógico (Impacto)
   const impacts = projectLogframes.filter(lf => lf.type === 'impact');
+
+  // Filtrar nodos padres candidatos basados en el nivel seleccionado
+  const getParentOptions = () => {
+    if (nodeType === 'outcome') {
+      return projectLogframes.filter(lf => lf.type === 'impact');
+    }
+    if (nodeType === 'output') {
+      return projectLogframes.filter(lf => lf.type === 'outcome');
+    }
+    if (nodeType === 'activity') {
+      return projectLogframes.filter(lf => lf.type === 'output');
+    }
+    return [];
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -235,7 +294,7 @@ export default function Projects({ currentUser }) {
           </div>
         </div>
 
-        {/* Columna Derecha: Detalles del Proyecto y LogFrame Jerárquico de 4 niveles (Pilar 2) */}
+        {/* Columna Derecha: Detalles del Proyecto y LogFrame Jerárquico de 4 niveles */}
         {activeProject ? (
           <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             {/* Detalles del proyecto */}
@@ -254,10 +313,94 @@ export default function Projects({ currentUser }) {
 
             {/* Matriz del Marco Lógico Jerárquica */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Layers size={20} className="text-primary" style={{ color: 'var(--primary-light)' }} />
-                <h3>Matriz de Marco Lógico (Jerarquía de 4 Niveles)</h3>
+              <div className="flex-between">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Layers size={20} className="text-primary" style={{ color: 'var(--primary-light)' }} />
+                  <h3>Matriz de Marco Lógico (Jerarquía de 4 Niveles)</h3>
+                </div>
+
+                {isAdmin && (
+                  <button 
+                    onClick={() => setShowAddNodeForm(!showAddNodeForm)} 
+                    className="btn btn-secondary"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  >
+                    <Plus size={14} /> Diseñar Matriz
+                  </button>
+                )}
               </div>
+
+              {/* Formulario Agregar Nodo al Marco Lógico (Pilar 2) */}
+              {showAddNodeForm && isAdmin && (
+                <div className="glass-card" style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', border: '1px dashed var(--border-glass)' }}>
+                  <h4 style={{ margin: 0, color: 'var(--primary-light)' }}>Agregar Componente a la Matriz</h4>
+                  
+                  <form onSubmit={handleAddLogframeNode} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div className="form-group">
+                      <label>Nivel de Matriz</label>
+                      <select 
+                        value={nodeType} 
+                        onChange={(e) => {
+                          setNodeType(e.target.value);
+                          setNodeParentId(''); // resetear padre al cambiar nivel
+                        }}
+                      >
+                        <option value="impact">Nivel 1: Impacto (Objetivo General)</option>
+                        <option value="outcome">Nivel 2: Resultado (Outcome)</option>
+                        <option value="output">Nivel 3: Producto (Output)</option>
+                        <option value="activity">Nivel 4: Actividad (Activity)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Código Identificador</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ej: R-2, P-1.2, A-2.1" 
+                        value={nodeCode}
+                        onChange={e => setNodeCode(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    {nodeType !== 'impact' && (
+                      <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                        <label>Vincular a Componente Padre (Anidación Jerárquica)</label>
+                        <select 
+                          value={nodeParentId}
+                          onChange={e => setNodeParentId(e.target.value)}
+                          required
+                        >
+                          <option value="">-- Seleccionar Padre --</option>
+                          {getParentOptions().map(parent => (
+                            <option key={parent.id} value={parent.id}>[{parent.code}] {parent.description.substring(0, 50)}...</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                      <label>Descripción / Enunciado del Componente</label>
+                      <textarea 
+                        rows="2" 
+                        placeholder="Describe el resultado, entregable o actividad..."
+                        value={nodeDescription}
+                        onChange={e => setNodeDescription(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.25rem' }}>
+                      <button type="button" onClick={() => setShowAddNodeForm(false)} className="btn btn-secondary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}>
+                        Cancelar
+                      </button>
+                      <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <Save size={12} /> Guardar Componente
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
 
               {impacts.length === 0 ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
