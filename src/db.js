@@ -1,16 +1,64 @@
 import Dexie from 'dexie';
 
+// --- PILAR CRIPTOGRÁFICO: Web Crypto API SHA-256 Determinista ---
+export async function calculateRecordHash(record) {
+  if (!record) return '';
+  // Clonamos el registro y removemos los campos meta/firma variables
+  const clean = { ...record };
+  delete clean.signature;
+  delete clean.sync_status;
+
+  // Ordenamos las claves alfabéticamente para asegurar que el stringificado sea determinista
+  const keys = Object.keys(clean).sort();
+  const sortedObj = {};
+  keys.forEach(k => {
+    sortedObj[k] = clean[k];
+  });
+  
+  const jsonString = JSON.stringify(sortedObj);
+  const encoder = new TextEncoder();
+  const dataBytes = encoder.encode(jsonString);
+
+  // Generar el hash SHA-256 con Web Crypto API
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', dataBytes);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
+
+export async function addWithSignature(store, record) {
+  const signature = await calculateRecordHash(record);
+  const signed = { ...record, signature };
+  await store.add(signed);
+  return signed;
+}
+
+export async function putWithSignature(store, record) {
+  const signature = await calculateRecordHash(record);
+  const signed = { ...record, signature };
+  await store.put(signed);
+  return signed;
+}
+
+async function bulkAddWithSignature(store, records) {
+  const signed = await Promise.all(records.map(async r => {
+    const signature = await calculateRecordHash(r);
+    return { ...r, signature };
+  }));
+  await store.bulkAdd(signed);
+}
+
 export const db = new Dexie('MealOfflineDB');
 
 db.version(1).stores({
-  profiles: 'id, email, role, updated_at, sync_status',
-  projects: 'id, name, status, start_date, end_date, updated_at',
-  logframes: 'id, project_id, type, code, parent_id, updated_at',
-  indicators: 'id, project_id, logframe_id, code, name, updated_at',
-  surveys: 'id, title, created_by, updated_at',
-  survey_responses: 'id, survey_id, submitted_by, submitted_at, updated_at, sync_status',
-  feedbacks: 'id, project_id, category, status, updated_at, sync_status',
-  lessons_learned: 'id, project_id, title, updated_at, sync_status',
+  profiles: 'id, email, role, updated_at, sync_status, signature',
+  projects: 'id, name, status, start_date, end_date, updated_at, signature',
+  logframes: 'id, project_id, type, code, parent_id, updated_at, signature',
+  indicators: 'id, project_id, logframe_id, code, name, updated_at, signature',
+  surveys: 'id, title, created_by, updated_at, signature',
+  survey_responses: 'id, survey_id, submitted_by, submitted_at, updated_at, sync_status, signature',
+  feedbacks: 'id, project_id, category, status, updated_at, sync_status, signature',
+  lessons_learned: 'id, project_id, title, updated_at, sync_status, signature',
   sync_meta: 'key, value'
 });
 
@@ -25,7 +73,7 @@ export async function seedLocalData() {
     return;
   }
 
-  console.log('Sembrando datos del proyecto "Guardianes del Mar Wayuu" en Dexie...');
+  console.log('Sembrando datos del proyecto "Guardianes del Mar Wayuu" en Dexie con Firmas SHA-256...');
   
   // Limpiar para asegurar reinicio limpio en pruebas funcionales
   await db.projects.clear();
@@ -43,7 +91,7 @@ export async function seedLocalData() {
   const projId = 'proj-wayuu-001';
 
   // 1. Proyecto Principal
-  await db.projects.add({
+  await addWithSignature(db.projects, {
     id: projId,
     name: 'Guardianes del Mar Wayuu',
     description: 'Fortalecimiento pesquero artesanal y desarrollo de experiencias turísticas comunitarias sostenibles en Mayapo y El Pájaro, Manaure, La Guajira.',
@@ -63,7 +111,7 @@ export async function seedLocalData() {
   const lf_outp1_1 = 'lf-wayuu-outp1.1'; // Producto Gobernanza
   const lf_outp2_1 = 'lf-wayuu-outp2.1'; // Producto Productivo
 
-  await db.logframes.bulkAdd([
+  await bulkAddWithSignature(db.logframes, [
     // Nivel 1: IMPACTO (Goal)
     {
       id: lf_impact,
@@ -173,18 +221,17 @@ export async function seedLocalData() {
   ]);
 
   // 3. Indicadores de Monitoreo con soporte de Datos Desagregados (Pilar 1 - Monitoreo)
-  await db.indicators.bulkAdd([
+  await bulkAddWithSignature(db.indicators, [
     {
       id: 'ind-wayuu-101',
       project_id: projId,
-      logframe_id: lf_out1, // Vinculado a R-1
+      logframe_id: lf_out1,
       code: 'IND-1.1',
       name: 'Personas que culminan los ciclos de formación en turismo, inocuidad y pesca',
       unit: 'Participantes',
       baseline: 0,
       target: 100,
       actual: 15,
-      // Datos desagregados cargados por defecto (Pilar 1)
       disaggregated_data: {
         gender: { male: 10, female: 5, other: 0 },
         age: { children: 0, youth: 3, adult: 10, elder: 2 },
@@ -196,7 +243,7 @@ export async function seedLocalData() {
     {
       id: 'ind-wayuu-102',
       project_id: projId,
-      logframe_id: lf_out1, // Vinculado a R-1
+      logframe_id: lf_out1,
       code: 'IND-1.2',
       name: 'Asociaciones de pescadores fortalecidas en gobernanza comunitaria y administración',
       unit: 'Asociaciones',
@@ -214,7 +261,7 @@ export async function seedLocalData() {
     {
       id: 'ind-wayuu-201',
       project_id: projId,
-      logframe_id: lf_out2, // Vinculado a R-2
+      logframe_id: lf_out2,
       code: 'IND-2.1',
       name: 'Asociaciones pesqueras dotadas de activos productivos de conservación y seguridad marítima',
       unit: 'Asociaciones',
@@ -227,13 +274,12 @@ export async function seedLocalData() {
         ethnicity: { indigenous: 0, afrodescendant: 0, local: 0 },
         location: { Mayapo: 0, ElPajaro: 0 }
       },
-      // HACE 40 DÍAS: Esto disparará el banner de alerta "ESTANCADO" (Pilar 1)
       updated_at: fortyDaysAgo
     },
     {
       id: 'ind-wayuu-301',
       project_id: projId,
-      logframe_id: lf_out3, // Vinculado a R-3
+      logframe_id: lf_out3,
       code: 'IND-3.1',
       name: 'Propuestas de experiencias turísticas comunitarias estructuradas y costeadas',
       unit: 'Propuestas',
@@ -251,12 +297,12 @@ export async function seedLocalData() {
   ]);
 
   // 4. Plantillas de Encuestas iniciales ancladas a indicadores (Pilar 2 - Evaluación)
-  await db.surveys.bulkAdd([
+  await bulkAddWithSignature(db.surveys, [
     {
       id: 'srv-wayuu-101',
       title: 'Ficha de Caracterización y Diagnóstico Socioeconómico (Mes 1)',
       description: 'Formulario de caracterización socioeconómica para el censo de pescadores en Mayapo y El Pájaro.',
-      indicator_id: 'ind-wayuu-101', // Anclada a IND-1.1 para evitar encuestas huérfanas
+      indicator_id: 'ind-wayuu-101',
       schema: {
         fields: [
           { name: 'full_name', label: 'Nombre Completo del Pescador', type: 'text', required: true },
@@ -276,7 +322,7 @@ export async function seedLocalData() {
       id: 'srv-wayuu-102',
       title: 'Evaluación del FAM TRIP y Satisfacción Comercial (Metas 9.6)',
       description: 'Encuesta técnica para evaluar la viabilidad de las experiencias piloto de pescaturismo.',
-      indicator_id: 'ind-wayuu-301', // Anclada a IND-3.1
+      indicator_id: 'ind-wayuu-301',
       schema: {
         fields: [
           { name: 'agency_name', label: 'Agencia de Viajes / Operadora Turística', type: 'text', required: true },
@@ -293,7 +339,7 @@ export async function seedLocalData() {
   ]);
 
   // 5. Quejas y Sugerencias bajo el estándar FCRM (Pilar 3 - Rendición de Cuentas)
-  await db.feedbacks.bulkAdd([
+  await bulkAddWithSignature(db.feedbacks, [
     {
       id: 'fb-wayuu-101',
       project_id: projId,
@@ -301,9 +347,9 @@ export async function seedLocalData() {
       details: 'Pescadores de la zona norte de Mayapo reportan que la marea alta ha socavado los postes de amarre y solicitan priorizar el estudio de geolocalización de puntos de embarque.',
       contact_info: 'Líder Gelasio Uriana, Cel: 312-445588',
       status: 'pending',
-      severity: 'medium', // Severidad (Pilar 3)
-      is_confidential: false, // No confidencial
-      response_text: null, // Sin respuesta oficial aún
+      severity: 'medium',
+      is_confidential: false,
+      response_text: null,
       updated_at: now,
       created_at: now,
       sync_status: 'synced'
@@ -315,10 +361,9 @@ export async function seedLocalData() {
       details: 'Reporte confidencial: Se detectaron sospechas de favoritismo familiar en la pre-asignación del kit de cavas de frío en la ranchería de El Pájaro.',
       contact_info: 'Pescador anónimo de El Pájaro',
       status: 'under_review',
-      severity: 'high', // Severidad Alta (Fraude/Protección) -> SLA: 5 días
-      is_confidential: true, // Confidencial (Pilar 3)
+      severity: 'high',
+      is_confidential: true,
       response_text: null,
-      // Hace 4 días para simular SLA en cuenta regresiva (queda 1 día)
       created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
       updated_at: now,
       sync_status: 'synced'
@@ -326,7 +371,7 @@ export async function seedLocalData() {
   ]);
 
   // 6. Lecciones Aprendidas vinculadas a Planes de Acción (Pilar 4 - Aprendizaje)
-  await db.lessons_learned.bulkAdd([
+  await bulkAddWithSignature(db.lessons_learned, [
     {
       id: 'll-wayuu-101',
       project_id: projId,
@@ -334,19 +379,18 @@ export async function seedLocalData() {
       description: 'Durante la operación piloto de la Ruta Ancestral Jemeilli, se evidenció que las agencias mayoristas exigen tarifas netas fijas anualizadas con comisiones del 20% y seguros de accidentes.',
       challenges: 'Las asociaciones comunitarias cambiaban los costos de los almuerzos semanalmente según el precio de mercado, rompiendo reservas de agencias.',
       recommendations: 'Establecer acuerdos de costos fijos estacionales por semestre con las asociaciones y contratar pólizas colectivas anuales.',
-      // Plan de Acción vinculado (Pilar 4)
       action_plan: {
         description: 'Redactar acuerdo firmado de tarifas fijas para almuerzos con la cooperativa de Mayapo.',
         responsible: 'Coordinador Territorial MEAL',
         deadline: '2026-07-15',
-        status: 'pending' // Estado de la acción
+        status: 'pending'
       },
       updated_at: now,
       sync_status: 'synced'
     }
   ]);
 
-  // 7. Sincronización Meta Inicial
+  // 7. Sincronización Meta Inicial (Esta tabla meta no requiere firma criptográfica por ser puramente de control operativo)
   await db.sync_meta.bulkAdd([
     { key: 'last_synced_at', value: '1970-01-01T00:00:00.000Z' },
     { key: 'network_mode', value: 'online' }

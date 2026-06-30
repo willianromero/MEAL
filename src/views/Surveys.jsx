@@ -1,8 +1,19 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, addWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { ClipboardList, Plus, FileText, Send, MapPin, Check, Info, Trash2 } from 'lucide-react';
+import { evaluateRule } from '../lib/rulesEngine';
+import SignatureVerifier from '../components/SignatureVerifier';
+import { ClipboardList, Plus, FileText, Send, MapPin, Check, Info, Trash2, ShieldAlert, Award, Eye } from 'lucide-react';
+
+// Regla determinista JSON para evaluar Carencia Productiva Crítica (Pilar 2)
+const CRITICAL_POVERTY_RULE = {
+  operator: "and",
+  rules: [
+    { field: "answers.fishing_only", operator: "equals", value: "Sí, dependemos 100% de la pesca" },
+    { field: "answers.boat_motor", operator: "not_equals", value: "Embarcación y motor propios operativos" }
+  ]
+};
 
 export default function Surveys({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -10,7 +21,7 @@ export default function Surveys({ currentUser }) {
   // Cargar datos reactivos locales
   const surveys = useLiveQuery(() => db.surveys.toArray()) || [];
   const responses = useLiveQuery(() => db.survey_responses.toArray()) || [];
-  const indicators = useLiveQuery(() => db.indicators.toArray()) || []; // Cargar indicadores (Pilar 2)
+  const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
 
   // Vista activa: 'collect' o 'design'
   const [tab, setTab] = useState('collect');
@@ -25,13 +36,14 @@ export default function Surveys({ currentUser }) {
   // Estados del Diseñador de Encuestas (Admin)
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyDesc, setSurveyDesc] = useState('');
-  const [selectedIndicatorId, setSelectedIndicatorId] = useState(''); // Vinculación a Indicador (Pilar 2)
-  const [designError, setDesignError] = useState(''); // Control de errores metodológicos
+  const [selectedIndicatorId, setSelectedIndicatorId] = useState('');
+  const [designError, setDesignError] = useState('');
   const [fields, setFields] = useState([
     { name: 'nombre_participante', label: 'Nombre del Participante', type: 'text', required: true }
   ]);
 
   const activeSurvey = surveys.find(s => s.id === selectedSurveyId);
+  const activeResponses = responses.filter(r => r.survey_id === selectedSurveyId);
 
   // --- DISEÑADOR DE ENCUESTAS (ADMIN) ---
   const addFieldToSchema = () => {
@@ -54,13 +66,11 @@ export default function Surveys({ currentUser }) {
     setDesignError('');
     if (!isAdmin || !surveyTitle) return;
 
-    // Validación cruzada estricta: impedir encuestas "huérfanas" (Pilar 2 - Evaluación)
     if (!selectedIndicatorId) {
       setDesignError('Error metodológico: La encuesta debe estar obligatoriamente anclada a un indicador de resultado específico para certificar la evaluación de impacto.');
       return;
     }
 
-    // Procesar campos select que tengan opciones
     const processedFields = fields.map(f => {
       const cleanF = { name: f.name.trim().toLowerCase().replace(/\s+/g, '_'), label: f.label, type: f.type, required: !!f.required };
       if (f.type === 'select' && f.options) {
@@ -76,14 +86,16 @@ export default function Surveys({ currentUser }) {
       id: newId,
       title: surveyTitle,
       description: surveyDesc,
-      indicator_id: selectedIndicatorId, // Guardar vinculación
+      indicator_id: selectedIndicatorId,
       schema: { fields: processedFields },
       created_by: currentUser.email,
       updated_at: now
     };
 
     try {
-      await db.surveys.add(newSurvey);
+      // Guardar con firma criptográfica SHA-256 (Pilar 3)
+      await addWithSignature(db.surveys, newSurvey);
+      
       setSurveyTitle('');
       setSurveyDesc('');
       setSelectedIndicatorId('');
@@ -129,7 +141,6 @@ export default function Surveys({ currentUser }) {
       },
       (error) => {
         console.error('Error capturando GPS:', error);
-        // Simular coordenadas ficticias sobre Mayapo en caso de fallo (frecuente en navegadores de desarrollo)
         setGpsData({
           lat: 11.7289 + (Math.random() - 0.5) * 0.01,
           lng: -72.7792 + (Math.random() - 0.5) * 0.01
@@ -156,11 +167,13 @@ export default function Surveys({ currentUser }) {
       gps_lng: gpsData.lng,
       answers: formData,
       updated_at: now,
-      sync_status: 'pending_sync' // Sincronización offline
+      sync_status: 'pending_sync'
     };
 
     try {
-      await db.survey_responses.add(newResponse);
+      // Guardar con firma criptográfica SHA-256 (Pilar 3)
+      await addWithSignature(db.survey_responses, newResponse);
+      
       setFormData({});
       setGpsData({ lat: null, lng: null });
       setSubmitSuccess(true);
@@ -168,7 +181,6 @@ export default function Surveys({ currentUser }) {
       
       setTimeout(() => {
         setSubmitSuccess(false);
-        setSelectedSurveyId(null);
       }, 2000);
     } catch (err) {
       console.error('Error guardando respuestas offline:', err);
@@ -181,7 +193,7 @@ export default function Surveys({ currentUser }) {
       <div className="flex-between">
         <div>
           <h1>Formularios y Captura de Campo</h1>
-          <p>Diligencia encuestas georreferenciadas offline o diseña nuevas fichas de monitoreo.</p>
+          <p>Diligencia encuestas georreferenciadas offline, diseña nuevas fichas de monitoreo y evalúa reglas de carencias en tiempo real.</p>
         </div>
 
         <div className="glass-panel" style={{ padding: '0.35rem', display: 'flex', gap: '0.25rem' }}>
@@ -252,7 +264,6 @@ export default function Surveys({ currentUser }) {
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <strong style={{ color: isSelected ? 'var(--primary-light)' : 'var(--text-primary)', fontSize: '0.95rem' }}>{s.title}</strong>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{s.description}</span>
-                        {/* Indicador Vinculado (Pilar 2) */}
                         {relIndicator && (
                           <span 
                             className="badge" 
@@ -278,103 +289,185 @@ export default function Surveys({ currentUser }) {
             </div>
           </div>
 
-          {/* CAPTURA DINÁMICA DE DATOS */}
+          {/* COLUMNA DERECHA: CAPTURA DINÁMICA + RESPUESTAS DE CAMPO */}
           {selectedSurveyId && activeSurvey && (
-            <div className="glass-panel" style={{ padding: '2rem' }}>
-              {submitSuccess ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 0', gap: '1rem' }}>
-                  <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-online)', padding: '1rem', borderRadius: '50%' }}>
-                    <Check size={48} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              
+              {/* FORMULARIO DE CAPTURA */}
+              <div className="glass-panel" style={{ padding: '2rem' }}>
+                {submitSuccess ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5rem 0', gap: '1rem' }}>
+                    <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-online)', padding: '0.75rem', borderRadius: '50%' }}>
+                      <Check size={36} />
+                    </div>
+                    <h3 style={{ margin: 0 }}>Respuestas Almacenadas</h3>
+                    <p style={{ textAlign: 'center', fontSize: '0.85rem', margin: 0 }}>Los datos fueron firmados criptográficamente SHA-256 y guardados localmente.</p>
                   </div>
-                  <h2>Ficha Guardada Offline</h2>
-                  <p style={{ textAlign: 'center' }}>Los datos se han guardado localmente en IndexedDB. Se subirán al servidor en la próxima sincronización.</p>
-                </div>
-              ) : (
-                <form onSubmit={handleSubmitResponse} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <div className="flex-between">
-                    <div>
-                      <h3 style={{ fontSize: '1.1rem' }}>{activeSurvey.title}</h3>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Registro por: {currentUser.email}</span>
-                    </div>
-                    <button type="button" onClick={() => setSelectedSurveyId(null)} className="btn btn-secondary" style={{ padding: '0.3rem 0.5rem' }}>
-                      Cerrar
-                    </button>
-                  </div>
-
-                  <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
-
-                  {/* Campos dinámicos del esquema */}
-                  {activeSurvey.schema.fields.map((f, idx) => (
-                    <div className="form-group" key={idx}>
-                      <label>{f.label} {f.required && <span style={{ color: '#ef4444' }}>*</span>}</label>
-                      
-                      {f.type === 'select' ? (
-                        <select 
-                          value={formData[f.name] || ''}
-                          onChange={e => handleInputChange(f.name, e.target.value)}
-                          required={f.required}
-                        >
-                          <option value="">-- Seleccionar opción --</option>
-                          {f.options?.map((opt, oIdx) => (
-                            <option key={oIdx} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      ) : f.type === 'textarea' ? (
-                        <textarea
-                          rows="3"
-                          value={formData[f.name] || ''}
-                          onChange={e => handleInputChange(f.name, e.target.value)}
-                          required={f.required}
-                        />
-                      ) : (
-                        <input
-                          type={f.type === 'number' ? 'number' : 'text'}
-                          value={formData[f.name] || ''}
-                          onChange={e => handleInputChange(f.name, e.target.value)}
-                          required={f.required}
-                        />
-                      )}
-                    </div>
-                  ))}
-
-                  {/* Captura de Coordenadas de Campo (GPS) */}
-                  <div 
-                    className="glass-card" 
-                    style={{ 
-                      background: 'rgba(0,0,0,0.1)', 
-                      padding: '1rem', 
-                      borderRadius: '8px', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'space-between',
-                      border: '1px solid var(--border-glass)'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <MapPin size={16} style={{ color: 'var(--primary-light)' }} /> Georreferenciación GPS
+                ) : (
+                  <form onSubmit={handleSubmitResponse} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <div className="flex-between">
+                      <div>
+                        <h3 style={{ fontSize: '1.1rem', margin: 0 }}>{activeSurvey.title}</h3>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Registro por: {currentUser.email}</span>
                       </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                        {gpsData.lat ? `Lat: ${gpsData.lat.toFixed(6)}, Lng: ${gpsData.lng.toFixed(6)}` : 'Coordenadas no capturadas'}
-                      </div>
+                      <button type="button" onClick={() => setSelectedSurveyId(null)} className="btn btn-secondary" style={{ padding: '0.3rem 0.5rem' }}>
+                        Cerrar
+                      </button>
                     </div>
 
-                    <button 
-                      type="button" 
-                      onClick={getGPSCoordinates} 
-                      disabled={isCapturingGps}
-                      className="btn btn-secondary"
-                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
+                    <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
+
+                    {/* Campos dinámicos del esquema */}
+                    {activeSurvey.schema.fields.map((f, idx) => (
+                      <div className="form-group" key={idx}>
+                        <label>{f.label} {f.required && <span style={{ color: '#ef4444' }}>*</span>}</label>
+                        
+                        {f.type === 'select' ? (
+                          <select 
+                            value={formData[f.name] || ''}
+                            onChange={e => handleInputChange(f.name, e.target.value)}
+                            required={f.required}
+                          >
+                            <option value="">-- Seleccionar opción --</option>
+                            {f.options?.map((opt, oIdx) => (
+                              <option key={oIdx} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        ) : f.type === 'textarea' ? (
+                          <textarea
+                            rows="2"
+                            value={formData[f.name] || ''}
+                            onChange={e => handleInputChange(f.name, e.target.value)}
+                            required={f.required}
+                          />
+                        ) : (
+                          <input
+                            type={f.type === 'number' ? 'number' : 'text'}
+                            value={formData[f.name] || ''}
+                            onChange={e => handleInputChange(f.name, e.target.value)}
+                            required={f.required}
+                          />
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Captura de Coordenadas de Campo (GPS) */}
+                    <div 
+                      className="glass-card" 
+                      style={{ 
+                        background: 'rgba(0,0,0,0.1)', 
+                        padding: '0.85rem', 
+                        borderRadius: '8px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'space-between',
+                        border: '1px solid var(--border-glass)'
+                      }}
                     >
-                      {isCapturingGps ? 'Obteniendo...' : gpsData.lat ? 'Recapturar GPS' : 'Obtener Coordenadas'}
-                    </button>
-                  </div>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          <MapPin size={14} style={{ color: 'var(--primary-light)' }} /> Georreferenciación GPS
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                          {gpsData.lat ? `Lat: ${gpsData.lat.toFixed(6)}, Lng: ${gpsData.lng.toFixed(6)}` : 'Coordenadas no capturadas'}
+                        </div>
+                      </div>
 
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-                    <Send size={16} /> Guardar Respuestas Offline
-                  </button>
-                </form>
-              )}
+                      <button 
+                        type="button" 
+                        onClick={getGPSCoordinates} 
+                        disabled={isCapturingGps}
+                        className="btn btn-secondary"
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.7rem' }}
+                      >
+                        {isCapturingGps ? 'Obteniendo...' : gpsData.lat ? 'Recapturar GPS' : 'Obtener Coordenadas'}
+                      </button>
+                    </div>
+
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
+                      <Send size={16} /> Guardar Respuestas Offline
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {/* HISTORIAL DE RESPUESTAS E INTEGRIDAD (Pilares 2 y 3) */}
+              <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <h3>Historial de Respuestas Recopiladas ({activeResponses.length})</h3>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '400px', overflowY: 'auto' }}>
+                  {activeResponses.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '1.5rem' }}>
+                      Aún no se registran respuestas para este formulario.
+                    </div>
+                  ) : (
+                    activeResponses.slice().reverse().map(resp => {
+                      // 1. Evaluar Carencia Crítica mediante Motor de Reglas Determinista (Pilar 2)
+                      const isVulnerable = evaluateRule(CRITICAL_POVERTY_RULE, resp);
+
+                      return (
+                        <div 
+                          key={resp.id} 
+                          className="glass-card" 
+                          style={{ 
+                            padding: '1rem', 
+                            fontSize: '0.8rem', 
+                            background: 'rgba(15,23,42,0.3)',
+                            borderLeft: isVulnerable ? '3px solid #ef4444' : '3px solid var(--border-glass)'
+                          }}
+                        >
+                          <div className="flex-between" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.25rem' }}>
+                            <span style={{ fontWeight: 'bold', color: 'var(--primary-light)' }}>
+                              Ficha: {resp.answers.full_name || 'Participante'}
+                            </span>
+                            
+                            {/* Verificador de Firma Criptográfica SHA-256 (Pilar 3) */}
+                            <SignatureVerifier record={resp} />
+                          </div>
+
+                          {/* Alerta del Motor de Reglas (Pilar 2) */}
+                          {isVulnerable && (
+                            <div 
+                              style={{ 
+                                background: 'rgba(239, 68, 68, 0.08)', 
+                                border: '1px solid rgba(239, 68, 68, 0.15)', 
+                                padding: '0.5rem', 
+                                borderRadius: '6px', 
+                                color: '#fca5a5', 
+                                fontWeight: 'bold', 
+                                marginBottom: '0.5rem',
+                                fontSize: '0.75rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.3rem'
+                              }}
+                            >
+                              <ShieldAlert size={14} style={{ color: '#ef4444' }} />
+                              Alerta: Carencia Productiva Crítica (Dependencia 100% de pesca sin motor propio)
+                            </div>
+                          )}
+
+                          {/* Respuestas detalladas */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                            <div>• Clan: <strong>{resp.answers.clan || 'N/A'}</strong></div>
+                            <div>• Ubicación: <strong>{resp.answers.location || 'N/A'}</strong></div>
+                            <div>• Exclusivo pesca: <strong>{resp.answers.fishing_only || 'N/A'}</strong></div>
+                            <div>• Activos: <strong>{resp.answers.boat_motor || 'N/A'}</strong></div>
+                          </div>
+
+                          <div className="flex-between" style={{ fontSize: '0.7rem', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-glass)', paddingTop: '0.4rem' }}>
+                            <span>Capturado: {new Date(resp.submitted_at).toLocaleString()}</span>
+                            {resp.gps_lat && (
+                              <span>📍 GPS: {resp.gps_lat.toFixed(4)}, {resp.gps_lng.toFixed(4)}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -388,7 +481,6 @@ export default function Surveys({ currentUser }) {
           
           <form onSubmit={handleSaveSurveyTemplate} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             
-            {/* Alerta de Error Metodológico */}
             {designError && (
               <div style={{ color: '#ef4444', fontSize: '0.85rem', fontWeight: 'bold', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.15)' }}>
                 {designError}
@@ -416,7 +508,6 @@ export default function Surveys({ currentUser }) {
               />
             </div>
 
-            {/* Selector de Indicador MEAL (Pilar 2 - Validación Cruzada) */}
             <div className="form-group">
               <label>Indicador MEAL Vinculado (Obligatorio para evitar encuestas huérfanas)</label>
               <select 

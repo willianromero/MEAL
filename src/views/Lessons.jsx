@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, addWithSignature, putWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
+import SignatureVerifier from '../components/SignatureVerifier';
 import { BookOpen, AlertTriangle, Lightbulb, Plus, Send, Info, Eye, ClipboardCheck, Calendar, User, CheckCircle2 } from 'lucide-react';
 
 export default function Lessons({ currentUser }) {
@@ -22,7 +23,7 @@ export default function Lessons({ currentUser }) {
   const [challenges, setChallenges] = useState('');
   const [recommendations, setRecommendations] = useState('');
 
-  // Formulario de Plan de Acción Vinculado (Pilar 4 - Aprendizaje)
+  // Formulario de Plan de Acción Vinculado
   const [actionDescription, setActionDescription] = useState('');
   const [actionResponsible, setActionResponsible] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
@@ -54,7 +55,7 @@ export default function Lessons({ currentUser }) {
         description: actionDescription,
         responsible: actionResponsible,
         deadline: actionDeadline,
-        status: 'pending' // Estado inicial (Pilar 4)
+        status: 'pending'
       },
       created_at: now,
       updated_at: now,
@@ -62,7 +63,8 @@ export default function Lessons({ currentUser }) {
     };
 
     try {
-      await db.lessons_learned.add(newLesson);
+      // Guardar con firmado criptográfico SHA-256 (Pilar 3)
+      await addWithSignature(db.lessons_learned, newLesson);
       
       setProjectId('');
       setTitle('');
@@ -85,7 +87,6 @@ export default function Lessons({ currentUser }) {
     }
   };
 
-  // Alternar estado de la acción del Plan de Acción directamente en la UI (Pilar 4)
   const handleToggleActionStatus = async (lessonId, currentStatus) => {
     if (isViewer) return;
 
@@ -99,12 +100,15 @@ export default function Lessons({ currentUser }) {
           status: nextStatus
         };
 
-        await db.lessons_learned.update(lessonId, {
+        const updatedLesson = {
+          ...lesson,
           action_plan: updatedActionPlan,
           updated_at: new Date().toISOString(),
           sync_status: 'pending_sync'
-        });
+        };
 
+        // Guardar actualizando firma (Pilar 3)
+        await putWithSignature(db.lessons_learned, updatedLesson);
         await updatePendingCount();
       }
     } catch (err) {
@@ -159,9 +163,14 @@ export default function Lessons({ currentUser }) {
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                       Proyecto: <strong style={{ color: 'var(--text-secondary)' }}>{project ? project.name : 'Cargando...'}</strong>
                     </span>
-                    <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
-                      {isSynced ? 'Sincronizado' : 'Pendiente Sincro'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {/* Validador Criptográfico de Integridad SHA-256 (Pilar 3) */}
+                      <SignatureVerifier record={lesson} />
+                      
+                      <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
+                        {isSynced ? 'Sincronizado' : 'Pendiente Sincro'}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Título */}
@@ -195,7 +204,7 @@ export default function Lessons({ currentUser }) {
                     )}
                   </div>
 
-                  {/* PLAN DE ACCIÓN VINCULADO (Pilar 4) */}
+                  {/* PLAN DE ACCIÓN VINCULADO */}
                   {ap.description && (
                     <div 
                       style={{ 
@@ -331,7 +340,7 @@ export default function Lessons({ currentUser }) {
                 />
               </div>
 
-              {/* SECCIÓN PLAN DE ACCIÓN OBLIGATORIO (Pilar 4 - Aprendizaje) */}
+              {/* SECCIÓN PLAN DE ACCIÓN OBLIGATORIO */}
               <div 
                 style={{ 
                   background: 'rgba(5, 150, 105, 0.02)', 

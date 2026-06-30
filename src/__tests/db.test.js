@@ -59,24 +59,27 @@ describe('Pruebas unitarias de base de datos local (Dexie.js Mock)', () => {
     // Simular base de datos vacía
     db.projects.count.mockResolvedValueOnce(0);
     db.projects.get.mockResolvedValueOnce(null);
+    db.logframes.get.mockResolvedValueOnce(null);
 
     await seedLocalData();
 
-    // Comprobar que se llamó a bulkAdd para poblar proyectos y otras tablas
-    expect(db.projects.bulkAdd).toHaveBeenCalled();
+    // Comprobar que se llamó a add/bulkAdd para poblar proyectos y otras tablas
+    expect(db.projects.add).toHaveBeenCalled();
     expect(db.logframes.bulkAdd).toHaveBeenCalled();
     expect(db.indicators.bulkAdd).toHaveBeenCalled();
     expect(db.surveys.bulkAdd).toHaveBeenCalled();
   });
 
   it('NO debería volver a sembrar datos si ya existen proyectos en IndexedDB', async () => {
-    // Simular que ya hay proyectos y el proyecto Wayuu existe
+    // Simular que ya hay proyectos y el proyecto Wayuu e Impacto existen
     db.projects.count.mockResolvedValueOnce(2);
     db.projects.get.mockResolvedValueOnce({ id: 'proj-wayuu-001', name: 'Guardianes del Mar' });
+    db.logframes.get.mockResolvedValueOnce({ id: 'lf-wayuu-impact', type: 'impact' });
 
     await seedLocalData();
 
-    // Comprobar que no se llamó a bulkAdd para no sobreescribir datos locales del usuario
+    // Comprobar que no se llamó a add ni bulkAdd para no sobreescribir datos locales del usuario
+    expect(db.projects.add).not.toHaveBeenCalled();
     expect(db.projects.bulkAdd).not.toHaveBeenCalled();
   });
 });

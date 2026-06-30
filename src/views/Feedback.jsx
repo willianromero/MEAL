@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, addWithSignature, putWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
+import SignatureVerifier from '../components/SignatureVerifier';
 import { MessageSquare, Send, CheckCircle2, AlertCircle, Info, Lock, Clock, ShieldAlert, EyeOff } from 'lucide-react';
 
 export default function Feedback({ currentUser }) {
@@ -20,7 +21,7 @@ export default function Feedback({ currentUser }) {
   const [category, setCategory] = useState('complaint');
   const [details, setDetails] = useState('');
   const [contactInfo, setContactInfo] = useState('');
-  const [severity, setSeverity] = useState('medium'); // Por defecto Media
+  const [severity, setSeverity] = useState('medium');
   const [isConfidential, setIsConfidential] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
@@ -51,7 +52,8 @@ export default function Feedback({ currentUser }) {
     };
 
     try {
-      await db.feedbacks.add(newFeedback);
+      // Guardar con firmado criptográfico SHA-256 (Pilar 3)
+      await addWithSignature(db.feedbacks, newFeedback);
       
       setProjectId('');
       setCategory('complaint');
@@ -76,22 +78,29 @@ export default function Feedback({ currentUser }) {
     if (!text || !text.trim()) return;
 
     try {
-      // Registrar la respuesta y marcar como resuelto
-      await db.feedbacks.update(fbId, {
-        response_text: text,
-        status: 'resolved',
-        updated_at: new Date().toISOString(),
-        sync_status: 'pending_sync'
-      });
+      // Obtener el registro completo para recalcular la firma antes de actualizar (Pilar 3)
+      const fb = await db.feedbacks.get(fbId);
+      if (fb) {
+        const updatedFeedback = {
+          ...fb,
+          response_text: text,
+          status: 'resolved',
+          updated_at: new Date().toISOString(),
+          sync_status: 'pending_sync'
+        };
 
-      // Limpiar el campo del textarea en el mapa local
-      setResponseMap(prev => {
-        const next = { ...prev };
-        delete next[fbId];
-        return next;
-      });
+        // Guardar actualizando firma
+        await putWithSignature(db.feedbacks, updatedFeedback);
 
-      await updatePendingCount();
+        // Limpiar el campo del textarea en el mapa local
+        setResponseMap(prev => {
+          const next = { ...prev };
+          delete next[fbId];
+          return next;
+        });
+
+        await updatePendingCount();
+      }
     } catch (err) {
       console.error('Error guardando respuesta al feedback:', err);
     }
@@ -101,12 +110,19 @@ export default function Feedback({ currentUser }) {
     if (!isAdmin) return;
 
     try {
-      await db.feedbacks.update(fbId, {
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-        sync_status: 'pending_sync'
-      });
-      await updatePendingCount();
+      const fb = await db.feedbacks.get(fbId);
+      if (fb) {
+        const updatedFeedback = {
+          ...fb,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+          sync_status: 'pending_sync'
+        };
+        
+        // Guardar actualizando firma
+        await putWithSignature(db.feedbacks, updatedFeedback);
+        await updatePendingCount();
+      }
     } catch (err) {
       console.error('Error actualizando estado de queja:', err);
     }
@@ -149,7 +165,6 @@ export default function Feedback({ currentUser }) {
     }
   };
 
-  // Calcular el estado de SLA (Pilar 3)
   const renderSlaStatus = (fb) => {
     if (fb.status === 'resolved') {
       return (
@@ -161,7 +176,7 @@ export default function Feedback({ currentUser }) {
 
     const createdTime = new Date(fb.created_at || fb.updated_at).getTime();
     const nowTime = Date.now();
-    let slaDays = 30; // Bajo por defecto
+    let slaDays = 30;
     if (fb.severity === 'high') slaDays = 5;
     else if (fb.severity === 'medium') slaDays = 15;
 
@@ -363,7 +378,6 @@ export default function Feedback({ currentUser }) {
                 const isSynced = fb.sync_status === 'synced';
                 const sevInfo = getSeverityBadge(fb.severity || 'low');
 
-                // Encriptación y Ocultamiento por Confidencialidad (Pilar 3)
                 const shouldMaskContact = fb.is_confidential && !isAdmin;
                 const contactLabel = shouldMaskContact 
                   ? '[CONFIDENCIAL - DETALLES RESERVADOS]' 
@@ -390,7 +404,6 @@ export default function Feedback({ currentUser }) {
                           {getCategoryLabel(fb.category)}
                         </span>
                         
-                        {/* Badge de Severidad (Pilar 3) */}
                         <span 
                           className="badge" 
                           style={{ 
@@ -403,6 +416,9 @@ export default function Feedback({ currentUser }) {
                           {sevInfo.text}
                         </span>
 
+                        {/* Validador Criptográfico de Integridad SHA-256 (Pilar 3) */}
+                        <SignatureVerifier record={fb} />
+
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           Proyecto: {project ? project.name : 'Desconocido'}
                         </span>
@@ -411,7 +427,7 @@ export default function Feedback({ currentUser }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         {renderSlaStatus(fb)}
 
-                        <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.6rem' }}>
+                        <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
                           {isSynced ? 'Sincronizado' : 'Pendiente Sincro'}
                         </span>
                         
@@ -426,7 +442,7 @@ export default function Feedback({ currentUser }) {
                       {fb.details}
                     </p>
 
-                    {/* Respuesta Oficial (si existe) */}
+                    {/* Respuesta Oficial */}
                     {hasResponseText && (
                       <div style={{ padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.04)', border: '1px solid rgba(16, 185, 129, 0.15)', borderRadius: '6px' }}>
                         <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#a7f3d0', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.2rem' }}>
@@ -448,7 +464,6 @@ export default function Feedback({ currentUser }) {
                       <span>Fecha Reporte: {new Date(fb.created_at || fb.updated_at).toLocaleString()}</span>
                       
                       {isAdmin ? (
-                        /* Selector administrativo de estado */
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           <label style={{ fontSize: '0.75rem' }}>Cambiar Estado:</label>
                           <select
@@ -464,7 +479,7 @@ export default function Feedback({ currentUser }) {
                       ) : null}
                     </div>
 
-                    {/* Sección para que el Administrador redacte respuesta oficial de cierre (Pilar 3) */}
+                    {/* Formulario para que el Administrador redacte respuesta oficial de cierre */}
                     {isAdmin && fb.status !== 'resolved' && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px dashed var(--border-glass)', paddingTop: '0.75rem', marginTop: '0.25rem' }}>
                         <textarea
