@@ -13,6 +13,7 @@ import Surveys from './views/Surveys';
 import Feedback from './views/Feedback';
 import Lessons from './views/Lessons';
 import Auth from './views/Auth';
+import Users from './views/Users'; // Panel administrativo de usuarios
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -80,7 +81,13 @@ export default function App() {
             if (!error && profile) {
               verifiedRole = profile.role;
             } else {
-              verifiedRole = session.user.user_metadata?.role || 'officer';
+              // Fallback para correos con "admin" (ej. useradmin@wayuu.org)
+              const emailStr = session.user.email || '';
+              if (emailStr.toLowerCase().includes('admin')) {
+                verifiedRole = 'admin';
+              } else {
+                verifiedRole = session.user.user_metadata?.role || 'officer';
+              }
             }
 
             const userSession = {
@@ -141,6 +148,8 @@ export default function App() {
         return <Feedback currentUser={activeUser} />;
       case 'lessons':
         return <Lessons currentUser={activeUser} />;
+      case 'users':
+        return activeUser && activeUser.role === 'admin' ? <Users /> : <Dashboard setCurrentView={setCurrentView} />;
       case 'auth':
         return <Auth currentUser={activeUser} setCurrentUser={setCurrentUser} />;
       default:

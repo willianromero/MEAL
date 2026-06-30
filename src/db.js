@@ -3,7 +3,7 @@ import Dexie from 'dexie';
 export const db = new Dexie('MealOfflineDB');
 
 db.version(1).stores({
-  profiles: 'id, email, role, updated_at',
+  profiles: 'id, email, role, updated_at, sync_status',
   projects: 'id, name, status, start_date, end_date, updated_at',
   logframes: 'id, project_id, type, code, parent_id, updated_at',
   indicators: 'id, project_id, logframe_id, code, name, updated_at',

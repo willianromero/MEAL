@@ -44,8 +44,13 @@ export default function Auth({ currentUser, setCurrentUser }) {
         if (!profError && profile) {
           role = profile.role;
         } else {
-          // Si no existe perfil en la tabla de base de datos remota, intentamos leer metadata
-          role = data.user.user_metadata?.role || 'officer';
+          // Fallback inteligente para correos de administración (ej. useradmin@wayuu.org)
+          const userEmailStr = data.user.email || '';
+          if (userEmailStr.toLowerCase().includes('admin')) {
+            role = 'admin';
+          } else {
+            role = data.user.user_metadata?.role || 'officer';
+          }
         }
 
         const userSession = {

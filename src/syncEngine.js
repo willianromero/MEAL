@@ -29,8 +29,9 @@ export async function updatePendingCount() {
     const pendingFeedbacks = await db.feedbacks.where('sync_status').equals('pending_sync').count();
     const pendingLessons = await db.lessons_learned.where('sync_status').equals('pending_sync').count();
     const pendingIndicators = await db.indicators.filter(ind => ind.sync_status === 'pending_sync').count();
+    const pendingProfiles = await db.profiles.filter(p => p.sync_status === 'pending_sync').count();
 
-    syncState.pendingCount = pendingResponses + pendingFeedbacks + pendingLessons + pendingIndicators;
+    syncState.pendingCount = pendingResponses + pendingFeedbacks + pendingLessons + pendingIndicators + pendingProfiles;
     
     const meta = await db.sync_meta.get('last_synced_at');
     if (meta && meta.value !== '1970-01-01T00:00:00.000Z') {
@@ -208,6 +209,19 @@ async function pushLocalChanges() {
       throw new Error(`Fallo push indicadores: ${error.message}`);
     }
   }
+
+  // 5. Perfiles (profiles)
+  const pendingProfiles = await db.profiles.filter(p => p.sync_status === 'pending_sync').toArray();
+  for (const prof of pendingProfiles) {
+    const cleanRecord = { ...prof };
+    delete cleanRecord.sync_status;
+    const { error } = await supabase.from('profiles').upsert(cleanRecord);
+    if (!error) {
+      await db.profiles.update(prof.id, { sync_status: 'synced' });
+    } else {
+      throw new Error(`Fallo push perfiles: ${error.message}`);
+    }
+  }
 }
 
 // --- RESOLUCIÓN MATEMÁTICA LAST WRITE WINS (LWW) ---
@@ -222,6 +236,7 @@ export function shouldRemoteOverwriteLocal(localRecord, remoteRecord) {
 // --- DESCARGAR CAMBIOS REMOTOS (PULL) ---
 async function pullRemoteChanges(lastSyncedStr) {
   const tablesToPull = [
+    { name: 'profiles', store: db.profiles }, // Descargar roles actualizados
     { name: 'projects', store: db.projects },
     { name: 'logframes', store: db.logframes },
     { name: 'indicators', store: db.indicators },

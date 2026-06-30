@@ -1,4 +1,5 @@
 import React from 'react';
+import { isSupabaseConfigured } from '../supabaseClient';
 import { 
   LayoutDashboard, 
   Briefcase, 
@@ -8,6 +9,7 @@ import {
   BookOpen, 
   ShieldCheck, 
   Globe,
+  Users as UsersIcon,
   X
 } from 'lucide-react';
 
@@ -15,7 +17,7 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
   const userRole = currentUser?.role || 'officer';
   const userEmail = currentUser?.email || 'anonimo@meal.org';
 
-  // Mapeo de vistas y roles permitidos
+  // Mapeo de vistas y roles permitidos (Pilar 2 - RLS/RBAC en UI)
   const navItems = [
     { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} />, roles: ['admin', 'officer', 'viewer'] },
     { id: 'projects', name: 'Proyectos & LogFrames', icon: <Briefcase size={18} />, roles: ['admin', 'officer', 'viewer'] },
@@ -23,7 +25,8 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
     { id: 'surveys', name: 'Encuestas Offline', icon: <ClipboardList size={18} />, roles: ['admin', 'officer'] },
     { id: 'feedback', name: 'Rendición de Cuentas', icon: <MessageSquare size={18} />, roles: ['admin', 'officer', 'viewer'] },
     { id: 'lessons', name: 'Lecciones Aprendidas', icon: <BookOpen size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'auth', name: 'Sesión y Simulación', icon: <ShieldCheck size={18} />, roles: ['admin', 'officer', 'viewer'] }
+    { id: 'users', name: 'Control de Usuarios', icon: <UsersIcon size={18} />, roles: ['admin'] }, // Panel exclusivo Admin
+    { id: 'auth', name: 'Sesión de Acceso', icon: <ShieldCheck size={18} />, roles: ['admin', 'officer', 'viewer'] }
   ];
 
   const getRoleLabel = (role) => {
@@ -106,7 +109,7 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
               key={item.id}
               onClick={() => {
                 setCurrentView(item.id);
-                if (onClose) onClose(); // Auto cerrar menú al hacer clic en móvil
+                if (onClose) onClose(); // Auto cerrar menú en móviles
               }}
               style={{
                 display: 'flex',
@@ -164,26 +167,29 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
           </span>
         </div>
         
-        <button
-          onClick={() => {
-            setCurrentView('auth');
-            if (onClose) onClose();
-          }}
-          style={{
-            marginTop: '0.4rem',
-            width: '100%',
-            padding: '0.35rem',
-            fontSize: '0.7rem',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid var(--border-glass)',
-            borderRadius: '6px',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontWeight: '600'
-          }}
-        >
-          Simular otro Rol
-        </button>
+        {/* Botón de simulación rápido oculto en producción (Supabase real conectado) */}
+        {!isSupabaseConfigured && (
+          <button
+            onClick={() => {
+              setCurrentView('auth');
+              if (onClose) onClose();
+            }}
+            style={{
+              marginTop: '0.4rem',
+              width: '100%',
+              padding: '0.35rem',
+              fontSize: '0.7rem',
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid var(--border-glass)',
+              borderRadius: '6px',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontWeight: '600'
+            }}
+          >
+            Simular otro Rol
+          </button>
+        )}
       </div>
     </aside>
   );
