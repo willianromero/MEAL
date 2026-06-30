@@ -71,10 +71,11 @@ describe('Pruebas unitarias de base de datos local (Dexie.js Mock)', () => {
   });
 
   it('NO debería volver a sembrar datos si ya existen proyectos en IndexedDB', async () => {
-    // Simular que ya hay proyectos y el proyecto Wayuu e Impacto existen
+    // Simular que ya hay proyectos, el proyecto Wayuu, el de Maicao y el Impacto existen en IndexedDB
     db.projects.count.mockResolvedValueOnce(2);
     db.projects.get.mockResolvedValueOnce({ id: 'proj-wayuu-001', name: 'Guardianes del Mar' });
-    db.logframes.get.mockResolvedValueOnce({ id: 'lf-wayuu-impact', type: 'impact' });
+    db.projects.get.mockResolvedValueOnce({ id: 'proj-maicao-002', name: 'Clinica Maicao' });
+    db.projects.get.mockResolvedValueOnce({ id: 'lf-wayuu-impact', type: 'impact' });
 
     await seedLocalData();
 
