@@ -3,6 +3,7 @@ import { seedLocalData } from './db';
 import Sidebar from './components/Sidebar';
 import SyncIndicator from './components/SyncIndicator';
 import { Menu, Sun, Moon } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 // Importar Vistas
 import Dashboard from './views/Dashboard';
@@ -23,7 +24,7 @@ export default function App() {
     return savedTheme || 'dark'; // Por defecto: oscuro
   });
 
-  // Cargar sesión inicial o iniciar con Oficial de Campo simulado por defecto
+  // Cargar sesión inicial o iniciar con sesión nula si Supabase está configurado (forzar autenticación)
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('meal_user_session');
     if (saved) {
@@ -33,6 +34,11 @@ export default function App() {
         console.error('Error cargando sesión local:', e);
       }
     }
+    // Si la conexión real está configurada, obligamos a autenticar en blanco
+    if (isSupabaseConfigured) {
+      return null;
+    }
+    // Modo demo local sin conexión real: autologueamos un oficial de campo
     return {
       id: 'mock-initial-officer-id',
       email: 'campo@meal.org',
@@ -40,7 +46,7 @@ export default function App() {
     };
   });
 
-  // Aplicar tema dinámicamente al elemento body
+  // Aplicar tema dinámicamente
   useEffect(() => {
     const bodyClass = document.body.classList;
     if (theme === 'light') {
@@ -56,26 +62,87 @@ export default function App() {
     seedLocalData();
   }, []);
 
+  // Pilar 2 (DevSecOps): Gestión de tokens y verificación remota de roles en el arranque
+  useEffect(() => {
+    if (isSupabaseConfigured) {
+      // 1. Validar el token y la sesión real en Supabase
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session && session.user) {
+          try {
+            // Consultar el rol verídico en la tabla profiles del servidor central
+            const { data: profile, error } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', session.user.id)
+              .single();
+
+            let verifiedRole = 'officer';
+            if (!error && profile) {
+              verifiedRole = profile.role;
+            } else {
+              verifiedRole = session.user.user_metadata?.role || 'officer';
+            }
+
+            const userSession = {
+              id: session.user.id,
+              email: session.user.email,
+              role: verifiedRole
+            };
+
+            setCurrentUser(userSession);
+            localStorage.setItem('meal_user_session', JSON.stringify(userSession));
+          } catch (e) {
+            console.error('Error al verificar perfil remoto en arranque:', e);
+            // Ante falla de verificación, obligamos a desloguear por seguridad
+            setCurrentUser(null);
+            localStorage.removeItem('meal_user_session');
+          }
+        } else {
+          // Si no hay sesión válida en Supabase, limpiamos cualquier residuo local
+          setCurrentUser(null);
+          localStorage.removeItem('meal_user_session');
+        }
+      });
+
+      // 2. Escuchar cambios de estado en la autenticación (ej: cierres de sesión remotos)
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          localStorage.removeItem('meal_user_session');
+          setCurrentView('auth');
+        }
+      });
+
+      return () => {
+        if (subscription) subscription.unsubscribe();
+      };
+    }
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  // Forzar visualización de Auth si no hay un usuario activo
+  const activeUser = currentUser;
+  const currentActiveView = activeUser ? currentView : 'auth';
+
   const renderView = () => {
-    switch (currentView) {
+    switch (currentActiveView) {
       case 'dashboard':
         return <Dashboard setCurrentView={setCurrentView} />;
       case 'projects':
-        return <Projects currentUser={currentUser} />;
+        return <Projects currentUser={activeUser} />;
       case 'indicators':
-        return <Indicators currentUser={currentUser} />;
+        return <Indicators currentUser={activeUser} />;
       case 'surveys':
-        return <Surveys currentUser={currentUser} />;
+        return <Surveys currentUser={activeUser} />;
       case 'feedback':
-        return <Feedback currentUser={currentUser} />;
+        return <Feedback currentUser={activeUser} />;
       case 'lessons':
-        return <Lessons currentUser={currentUser} />;
+        return <Lessons currentUser={activeUser} />;
       case 'auth':
-        return <Auth currentUser={currentUser} setCurrentUser={setCurrentUser} />;
+        return <Auth currentUser={activeUser} setCurrentUser={setCurrentUser} />;
       default:
         return <Dashboard setCurrentView={setCurrentView} />;
     }
@@ -83,7 +150,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* 1. Barra superior para móviles y tabletas */}
+      {/* 1. Barra superior para móviles */}
       <div className="mobile-topbar">
         <button 
           onClick={() => setIsMobileMenuOpen(true)}
@@ -105,7 +172,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* 2. Overlay para cerrar menú móvil al hacer clic fuera */}
+      {/* 2. Overlay móvil */}
       {isMobileMenuOpen && (
         <div 
           className="sidebar-overlay" 
@@ -113,24 +180,29 @@ export default function App() {
         />
       )}
 
-      {/* 3. Barra Lateral (Sidebar responsive limpia) */}
+      {/* 3. Barra Lateral (Sidebar responsive) */}
       <Sidebar 
-        currentView={currentView} 
-        setCurrentView={setCurrentView} 
-        currentUser={currentUser}
+        currentView={currentActiveView} 
+        setCurrentView={(view) => {
+          if (activeUser) {
+            setCurrentView(view);
+          } else {
+            setCurrentView('auth');
+          }
+          setIsMobileMenuOpen(false);
+        }} 
+        currentUser={activeUser}
         isMobileOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
       />
       
       {/* 4. Contenido Principal */}
       <main className="main-content">
-        {/* Fila de controles superiores (desktop: Sync Indicator + Theme Toggle) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', width: '100%' }}>
           <div style={{ flex: 1 }}>
             <SyncIndicator />
           </div>
           
-          {/* Botón de tema para Escritorio */}
           <button
             onClick={toggleTheme}
             className="btn btn-secondary"
