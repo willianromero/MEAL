@@ -13,7 +13,7 @@ import {
   X
 } from 'lucide-react';
 
-export default function Sidebar({ currentView, setCurrentView, currentUser, isMobileOpen, onClose }) {
+export default function Sidebar({ currentView, setCurrentView, currentUser, isMobileOpen, onClose, onLogout }) {
   const userRole = currentUser?.role || 'officer';
   const userEmail = currentUser?.email || 'anonimo@meal.org';
 
@@ -188,6 +188,29 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
             }}
           >
             Simular otro Rol
+          </button>
+        )}
+
+        {/* Botón permanente de Cerrar Sesión en la Barra Lateral */}
+        {currentUser && (
+          <button
+            onClick={onLogout}
+            style={{
+              marginTop: '0.4rem',
+              width: '100%',
+              padding: '0.45rem',
+              fontSize: '0.75rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '6px',
+              color: '#fca5a5',
+              cursor: 'pointer',
+              fontWeight: '600',
+              textAlign: 'center',
+              transition: 'var(--transition-smooth)'
+            }}
+          >
+            Cerrar Sesión
           </button>
         )}
       </div>

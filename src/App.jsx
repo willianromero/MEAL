@@ -130,6 +130,19 @@ export default function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const handleLogout = async () => {
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      console.error('Error cerrando sesión en Supabase:', e);
+    }
+    setCurrentUser(null);
+    localStorage.removeItem('meal_user_session');
+    setCurrentView('auth');
+  };
+
   // Forzar visualización de Auth si no hay un usuario activo
   const activeUser = currentUser;
   const currentActiveView = activeUser ? currentView : 'auth';
@@ -203,6 +216,7 @@ export default function App() {
         currentUser={activeUser}
         isMobileOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
+        onLogout={handleLogout}
       />
       
       {/* 4. Contenido Principal */}

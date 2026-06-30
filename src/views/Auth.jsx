@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
-import { Shield, Key, AlertCircle, Check, Users, Database, HelpCircle } from 'lucide-react';
+import { Shield, Key, AlertCircle, Check, Users, Database, HelpCircle, EyeOff } from 'lucide-react';
 
 export default function Auth({ currentUser, setCurrentUser }) {
   const [email, setEmail] = useState('');
@@ -9,8 +9,13 @@ export default function Auth({ currentUser, setCurrentUser }) {
   const [message, setMessage] = useState(null);
   const [isError, setIsError] = useState(false);
 
+  // Control de cambio de contraseña
+  const [newPassword, setNewPassword] = useState('');
+  const [pwError, setPwError] = useState(null);
+  const [pwSuccess, setPwSuccess] = useState(null);
+  const [isLoadingPw, setIsLoadingPw] = useState(false);
+
   // Controlar si mostramos el panel de simulación de roles locales
-  // Si Supabase está configurado, por defecto se oculta para no confundir al usuario
   const [showSimulator, setShowSimulator] = useState(!isSupabaseConfigured);
 
   const handleLogin = async (e) => {
@@ -32,19 +37,16 @@ export default function Auth({ currentUser, setCurrentUser }) {
       if (error) throw error;
 
       if (data && data.user) {
-        // Buscar si existe perfil en la base de datos real
-        // Hacemos una consulta rápida a la tabla de perfiles en Supabase
         const { data: profile, error: profError } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', data.user.id)
           .single();
 
-        let role = 'officer'; // Por defecto
+        let role = 'officer';
         if (!profError && profile) {
           role = profile.role;
         } else {
-          // Fallback inteligente para correos de administración (ej. useradmin@wayuu.org)
           const userEmailStr = data.user.email || '';
           if (userEmailStr.toLowerCase().includes('admin')) {
             role = 'admin';
@@ -68,6 +70,30 @@ export default function Auth({ currentUser, setCurrentUser }) {
       showMessage(err.message || 'Error al iniciar sesión', true);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(null);
+
+    if (newPassword.length < 6) {
+      setPwError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    setIsLoadingPw(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setPwSuccess('¡Contraseña actualizada con éxito en Supabase!');
+      setNewPassword('');
+    } catch (err) {
+      console.error('Error al actualizar contraseña:', err);
+      setPwError(err.message || 'Error al actualizar contraseña.');
+    } finally {
+      setIsLoadingPw(false);
     }
   };
 
@@ -130,7 +156,6 @@ export default function Auth({ currentUser, setCurrentUser }) {
           </p>
         </div>
 
-        {/* Badge de estado de conexión real en la nube */}
         <span 
           className={`badge ${isSupabaseConfigured ? 'badge-success' : 'badge-warning'}`}
           style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.4rem 0.8rem' }}
@@ -202,6 +227,40 @@ export default function Auth({ currentUser, setCurrentUser }) {
             </ul>
           </div>
 
+          {/* Formulario de Cambio de Contraseña (Supabase real) (Pilar 2) */}
+          {isSupabaseConfigured && !currentUser.email.endsWith('@meal.org') && (
+            <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '1.25rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <h3 style={{ fontSize: '0.95rem', margin: 0, color: 'var(--primary-light)' }}>Actualizar Contraseña</h3>
+              
+              {pwError && (
+                <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 'bold' }}>{pwError}</span>
+              )}
+              {pwSuccess && (
+                <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'bold' }}>{pwSuccess}</span>
+              )}
+
+              <form onSubmit={handleUpdatePassword} style={{ display: 'flex', gap: '0.5rem' }}>
+                <input 
+                  type="password"
+                  placeholder="Nueva contraseña (mínimo 6 caracteres)"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  style={{ fontSize: '0.8rem', padding: '0.4rem', flex: 1 }}
+                  required
+                  disabled={isLoadingPw}
+                />
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                  disabled={isLoadingPw || !newPassword}
+                >
+                  {isLoadingPw ? 'Guardando...' : 'Actualizar'}
+                </button>
+              </form>
+            </div>
+          )}
+
           <button onClick={handleLogout} className="btn btn-danger" disabled={isLoading} style={{ width: '100%' }}>
             Cerrar Sesión
           </button>
@@ -264,7 +323,7 @@ export default function Auth({ currentUser, setCurrentUser }) {
               <button
                 onClick={() => setShowSimulator(!showSimulator)}
                 className="btn btn-secondary"
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                style={{ padding: '0.3rem 0.6.rem', fontSize: '0.75rem' }}
               >
                 {showSimulator ? 'Ocultar' : 'Mostrar'}
               </button>
