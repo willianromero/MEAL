@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { Briefcase, Calendar, FolderPlus, Layers, Plus, ChevronRight, Info } from 'lucide-react';
+import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play } from 'lucide-react';
 
 export default function Projects({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -45,17 +45,50 @@ export default function Projects({ currentUser }) {
     try {
       await db.projects.add(newProject);
       
-      // Auto crear un resultado por defecto (LogFrame) para este proyecto
-      const lfId = `lf-uuid-${Math.random().toString(36).substr(2, 9)}`;
-      await db.logframes.add({
-        id: lfId,
-        project_id: newId,
-        type: 'outcome',
-        code: 'R-1',
-        description: 'Resultado inicial del proyecto (editar en base de datos).',
-        parent_id: null,
-        updated_at: now
-      });
+      // Auto crear estructura base de 4 niveles por defecto
+      const impactId = `lf-uuid-imp-${Math.random().toString(36).substr(2, 5)}`;
+      const outcomeId = `lf-uuid-out-${Math.random().toString(36).substr(2, 5)}`;
+      const outputId = `lf-uuid-otp-${Math.random().toString(36).substr(2, 5)}`;
+      const activityId = `lf-uuid-act-${Math.random().toString(36).substr(2, 5)}`;
+
+      await db.logframes.bulkAdd([
+        {
+          id: impactId,
+          project_id: newId,
+          type: 'impact',
+          code: 'OBJ-G',
+          description: 'Objetivo general a largo plazo del proyecto.',
+          parent_id: null,
+          updated_at: now
+        },
+        {
+          id: outcomeId,
+          project_id: newId,
+          type: 'outcome',
+          code: 'R-1',
+          description: 'Efecto o cambio de mediano plazo (Resultado).',
+          parent_id: impactId,
+          updated_at: now
+        },
+        {
+          id: outputId,
+          project_id: newId,
+          type: 'output',
+          code: 'P-1.1',
+          description: 'Bien o servicio entregado de forma directa (Producto).',
+          parent_id: outcomeId,
+          updated_at: now
+        },
+        {
+          id: activityId,
+          project_id: newId,
+          type: 'activity',
+          code: 'A-1.1',
+          description: 'Acción operativa para construir el producto.',
+          parent_id: outputId,
+          updated_at: now
+        }
+      ]);
 
       // Resetear formulario
       setName('');
@@ -75,7 +108,8 @@ export default function Projects({ currentUser }) {
     ? logframes.filter(lf => lf.project_id === activeProject.id)
     : [];
 
-  const outcomes = projectLogframes.filter(lf => lf.type === 'outcome');
+  // Extraer los elementos raíz del Marco Lógico (Impacto)
+  const impacts = projectLogframes.filter(lf => lf.type === 'impact');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -98,7 +132,7 @@ export default function Projects({ currentUser }) {
         )}
       </div>
 
-      {/* Formulario Crear Proyecto (Visible solo si Admin y toggle activado) */}
+      {/* Formulario Crear Proyecto */}
       {showAddForm && isAdmin && (
         <div className="glass-panel" style={{ padding: '2rem' }}>
           <h2 style={{ marginBottom: '1.25rem' }}>Agregar Nuevo Proyecto</h2>
@@ -201,7 +235,7 @@ export default function Projects({ currentUser }) {
           </div>
         </div>
 
-        {/* Columna Derecha: Detalles del Proyecto y LogFrame */}
+        {/* Columna Derecha: Detalles del Proyecto y LogFrame Jerárquico de 4 niveles (Pilar 2) */}
         {activeProject ? (
           <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             {/* Detalles del proyecto */}
@@ -218,75 +252,136 @@ export default function Projects({ currentUser }) {
 
             <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
 
-            {/* Matriz del Marco Lógico (LogFrame) */}
+            {/* Matriz del Marco Lógico Jerárquica */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Layers size={20} className="text-primary" style={{ color: 'var(--primary-light)' }} />
-                <h3>Estructura del Marco Lógico (LogFrame)</h3>
+                <h3>Matriz de Marco Lógico (Jerarquía de 4 Niveles)</h3>
               </div>
 
-              {outcomes.length === 0 ? (
+              {impacts.length === 0 ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
                   Este proyecto no posee una matriz de marco lógico cargada.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  {outcomes.map(out => {
-                    // Obtener actividades del resultado
-                    const activities = projectLogframes.filter(lf => lf.type === 'activity' && lf.parent_id === out.id);
-                    
-                    // Obtener indicadores asociados a este resultado
-                    const outcomeIndicators = indicators.filter(ind => ind.logframe_id === out.id);
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                  {impacts.map(imp => {
+                    // Obtener resultados del impacto (Nivel 2)
+                    const outcomes = projectLogframes.filter(lf => lf.type === 'outcome' && lf.parent_id === imp.id);
 
                     return (
-                      <div key={out.id} className="glass-card" style={{ background: 'rgba(15, 23, 42, 0.4)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {/* Resultado (Outcome) */}
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <span className="badge badge-info" style={{ alignSelf: 'flex-start', padding: '0.15rem 0.5rem' }}>{out.code}</span>
-                          <div>
-                            <strong style={{ color: 'var(--text-primary)' }}>Resultado: </strong>
-                            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>{out.description}</span>
+                      <div key={imp.id} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        
+                        {/* 1. IMPACTO (OBJETIVO GENERAL) */}
+                        <div className="glass-card" style={{ background: 'rgba(5, 150, 105, 0.03)', borderLeft: '4px solid var(--primary-light)', padding: '1.25rem' }}>
+                          <div style={{ display: 'flex', gap: '0.65rem' }}>
+                            <span className="badge" style={{ background: 'var(--primary-color)', color: 'white', display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.5rem' }}>
+                              <Award size={12} /> {imp.code}
+                            </span>
+                            <div>
+                              <strong style={{ color: 'var(--primary-light)', fontSize: '0.95rem' }}>Impacto (Objetivo General):</strong>
+                              <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{imp.description}</p>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Indicadores del Resultado */}
-                        {outcomeIndicators.length > 0 && (
-                          <div style={{ marginLeft: '1.5rem', background: 'rgba(5, 150, 105, 0.05)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--primary-color)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--primary-light)' }}>Indicadores de Resultado:</div>
-                            {outcomeIndicators.map(ind => (
-                              <div key={ind.id} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                • <strong>{ind.code}</strong>: {ind.name} (Meta: {ind.target} {ind.unit} / Logro: {ind.actual} {ind.unit})
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        {/* ANIDACIÓN: RESULTADOS (Nivel 2) */}
+                        <div style={{ marginLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                          {outcomes.map(out => {
+                            // Obtener productos del resultado (Nivel 3)
+                            const outputs = projectLogframes.filter(lf => lf.type === 'output' && lf.parent_id === out.id);
+                            // Indicadores asociados al resultado
+                            const outcomeIndicators = indicators.filter(ind => ind.logframe_id === out.id);
 
-                        {/* Actividades Hijas (Activities) */}
-                        {activities.length > 0 && (
-                          <div style={{ marginLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Actividades Habilitadoras:</div>
-                            
-                            {activities.map(act => {
-                              // Indicadores asociados a la actividad
-                              const actIndicators = indicators.filter(ind => ind.logframe_id === act.id);
-
-                              return (
-                                <div key={act.id} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <span className="badge" style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--text-primary)', padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>{act.code}</span>
-                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{act.description}</span>
+                            return (
+                              <div key={out.id} className="glass-card" style={{ background: 'rgba(15, 23, 42, 0.3)', padding: '1.25rem', borderLeft: '3px solid var(--secondary-color)' }}>
+                                <div style={{ display: 'flex', gap: '0.65rem', marginBottom: '0.75rem' }}>
+                                  <span className="badge" style={{ background: 'var(--secondary-color)', color: 'white', display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.5rem' }}>
+                                    <Target size={12} /> {out.code}
+                                  </span>
+                                  <div>
+                                    <strong style={{ color: 'var(--secondary-light)', fontSize: '0.9rem' }}>Resultado (Outcome):</strong>
+                                    <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', display: 'block', marginTop: '0.15rem' }}>{out.description}</span>
                                   </div>
-                                  
-                                  {actIndicators.map(ind => (
-                                    <div key={ind.id} style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '1rem', borderLeft: '2px dashed var(--border-glass)', paddingLeft: '0.5rem' }}>
-                                      Indicador {ind.code}: {ind.name} (Meta: {ind.target} {ind.unit} / Logrado: {ind.actual})
-                                    </div>
-                                  ))}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        )}
+
+                                {/* Indicadores de Resultado */}
+                                {outcomeIndicators.length > 0 && (
+                                  <div style={{ margin: '0.75rem 0 0.75rem 1.25rem', background: 'rgba(5, 150, 105, 0.04)', padding: '0.65rem', borderRadius: '6px', fontSize: '0.75rem' }}>
+                                    <div style={{ fontWeight: 'bold', color: 'var(--primary-light)', marginBottom: '0.25rem' }}>🎯 Indicadores de Resultado:</div>
+                                    {outcomeIndicators.map(ind => (
+                                      <div key={ind.id}>
+                                        • <strong>{ind.code}</strong>: {ind.name} (Meta: {ind.target} / Logrado: {ind.actual})
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* ANIDACIÓN: PRODUCTOS (Nivel 3) */}
+                                <div style={{ marginLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+                                  {outputs.map(outp => {
+                                    // Obtener actividades del producto (Nivel 4)
+                                    const activities = projectLogframes.filter(lf => lf.type === 'activity' && lf.parent_id === outp.id);
+                                    // Indicadores asociados al producto
+                                    const outputIndicators = indicators.filter(ind => ind.logframe_id === outp.id);
+
+                                    return (
+                                      <div key={outp.id} style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', padding: '0.85rem', borderRadius: '8px' }}>
+                                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                          <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem' }}>
+                                            <Package size={10} /> {outp.code}
+                                          </span>
+                                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                            <strong>Producto (Output):</strong> {outp.description}
+                                          </span>
+                                        </div>
+
+                                        {/* Indicadores de Producto */}
+                                        {outputIndicators.length > 0 && (
+                                          <div style={{ marginLeft: '1rem', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                                            {outputIndicators.map(ind => (
+                                              <div key={ind.id}>
+                                                📋 Indicador {ind.code}: {ind.name} (Meta: {ind.target} / Logrado: {ind.actual})
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        {/* ANIDACIÓN: ACTIVIDADES (Nivel 4) */}
+                                        <div style={{ marginLeft: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                          {activities.map(act => {
+                                            const actIndicators = indicators.filter(ind => ind.logframe_id === act.id);
+
+                                            return (
+                                              <div key={act.id} style={{ padding: '0.5rem 0.75rem', background: 'rgba(0,0,0,0.1)', borderRadius: '6px', border: '1px dashed var(--border-glass)' }}>
+                                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                                  <span className="badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.65rem' }}>
+                                                    <Play size={8} /> {act.code}
+                                                  </span>
+                                                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{act.description}</span>
+                                                </div>
+
+                                                {/* Indicadores de Actividad */}
+                                                {actIndicators.map(ind => (
+                                                  <div key={ind.id} style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: '1rem', marginTop: '0.25rem' }}>
+                                                    ⚙️ {ind.code}: {ind.name} (Logro: {ind.actual} / Meta: {ind.target})
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                              </div>
+                            );
+                          })}
+                        </div>
+
                       </div>
                     );
                   })}

@@ -10,8 +10,9 @@ export default function Surveys({ currentUser }) {
   // Cargar datos reactivos locales
   const surveys = useLiveQuery(() => db.surveys.toArray()) || [];
   const responses = useLiveQuery(() => db.survey_responses.toArray()) || [];
+  const indicators = useLiveQuery(() => db.indicators.toArray()) || []; // Cargar indicadores (Pilar 2)
 
-  // Vista activa: 'collect' (llenar encuestas) o 'design' (diseñar plantillas)
+  // Vista activa: 'collect' o 'design'
   const [tab, setTab] = useState('collect');
   const [selectedSurveyId, setSelectedSurveyId] = useState(null);
 
@@ -24,6 +25,8 @@ export default function Surveys({ currentUser }) {
   // Estados del Diseñador de Encuestas (Admin)
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyDesc, setSurveyDesc] = useState('');
+  const [selectedIndicatorId, setSelectedIndicatorId] = useState(''); // Vinculación a Indicador (Pilar 2)
+  const [designError, setDesignError] = useState(''); // Control de errores metodológicos
   const [fields, setFields] = useState([
     { name: 'nombre_participante', label: 'Nombre del Participante', type: 'text', required: true }
   ]);
@@ -48,7 +51,14 @@ export default function Surveys({ currentUser }) {
 
   const handleSaveSurveyTemplate = async (e) => {
     e.preventDefault();
+    setDesignError('');
     if (!isAdmin || !surveyTitle) return;
+
+    // Validación cruzada estricta: impedir encuestas "huérfanas" (Pilar 2 - Evaluación)
+    if (!selectedIndicatorId) {
+      setDesignError('Error metodológico: La encuesta debe estar obligatoriamente anclada a un indicador de resultado específico para certificar la evaluación de impacto.');
+      return;
+    }
 
     // Procesar campos select que tengan opciones
     const processedFields = fields.map(f => {
@@ -66,6 +76,7 @@ export default function Surveys({ currentUser }) {
       id: newId,
       title: surveyTitle,
       description: surveyDesc,
+      indicator_id: selectedIndicatorId, // Guardar vinculación
       schema: { fields: processedFields },
       created_by: currentUser.email,
       updated_at: now
@@ -75,11 +86,13 @@ export default function Surveys({ currentUser }) {
       await db.surveys.add(newSurvey);
       setSurveyTitle('');
       setSurveyDesc('');
+      setSelectedIndicatorId('');
       setFields([{ name: 'nombre_participante', label: 'Nombre del Participante', type: 'text', required: true }]);
       setTab('collect');
       setSelectedSurveyId(newId);
     } catch (err) {
       console.error('Error guardando plantilla:', err);
+      setDesignError('Error al registrar la plantilla en base de datos local.');
     }
   };
 
@@ -98,72 +111,67 @@ export default function Surveys({ currentUser }) {
     });
   };
 
-  const handleGetLocation = () => {
+  const getGPSCoordinates = () => {
     setIsCapturingGps(true);
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setGpsData({
-            lat: parseFloat(position.coords.latitude.toFixed(6)),
-            lng: parseFloat(position.coords.longitude.toFixed(6))
-          });
-          setIsCapturingGps(false);
-        },
-        (error) => {
-          console.warn('Geolocalización denegada o no disponible, simulando coordenadas en terreno...');
-          simulateGps();
-        },
-        { timeout: 8000 }
-      );
-    } else {
-      simulateGps();
+    if (!navigator.geolocation) {
+      alert('Tu navegador o dispositivo no soporta geolocalización');
+      setIsCapturingGps(false);
+      return;
     }
-  };
 
-  const simulateGps = () => {
-    // Simular ubicación en alguna zona de intervención de ejemplo
-    const randomLat = (13.6929 + (Math.random() - 0.5) * 0.1).toFixed(6);
-    const randomLng = (-89.2182 + (Math.random() - 0.5) * 0.1).toFixed(6);
-    setGpsData({
-      lat: parseFloat(randomLat),
-      lng: parseFloat(randomLng)
-    });
-    setIsCapturingGps(false);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGpsData({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+        setIsCapturingGps(false);
+      },
+      (error) => {
+        console.error('Error capturando GPS:', error);
+        // Simular coordenadas ficticias sobre Mayapo en caso de fallo (frecuente en navegadores de desarrollo)
+        setGpsData({
+          lat: 11.7289 + (Math.random() - 0.5) * 0.01,
+          lng: -72.7792 + (Math.random() - 0.5) * 0.01
+        });
+        setIsCapturingGps(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   };
 
   const handleSubmitResponse = async (e) => {
     e.preventDefault();
-    if (!activeSurvey) return;
+    if (!selectedSurveyId) return;
 
-    const newResponseId = `resp-uuid-${Math.random().toString(36).substr(2, 9)}`;
+    const responseId = `sr-uuid-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
     const newResponse = {
-      id: newResponseId,
-      survey_id: activeSurvey.id,
-      submitted_by: currentUser.email || 'anonimo@meal.org',
-      data: formData,
+      id: responseId,
+      survey_id: selectedSurveyId,
+      submitted_by: currentUser.email,
+      submitted_at: now,
       gps_lat: gpsData.lat,
       gps_lng: gpsData.lng,
-      submitted_at: now,
+      answers: formData,
       updated_at: now,
-      sync_status: 'pending_sync' // Guardar offline listo para subir
+      sync_status: 'pending_sync' // Sincronización offline
     };
 
     try {
       await db.survey_responses.add(newResponse);
-      setSubmitSuccess(true);
       setFormData({});
       setGpsData({ lat: null, lng: null });
+      setSubmitSuccess(true);
       await updatePendingCount();
       
-      // Salir del formulario en 2 segundos
       setTimeout(() => {
-        setSelectedSurveyId(null);
         setSubmitSuccess(false);
+        setSelectedSurveyId(null);
       }, 2000);
     } catch (err) {
-      console.error('Error al registrar respuesta de encuesta:', err);
+      console.error('Error guardando respuestas offline:', err);
     }
   };
 
@@ -172,49 +180,47 @@ export default function Surveys({ currentUser }) {
       {/* Cabecera */}
       <div className="flex-between">
         <div>
-          <h1>Formularios y Captura de Datos</h1>
-          <p>Llena encuestas en comunidades sin conexión a red o diseña nuevas plantillas dinámicas.</p>
+          <h1>Formularios y Captura de Campo</h1>
+          <p>Diligencia encuestas georreferenciadas offline o diseña nuevas fichas de monitoreo.</p>
         </div>
-      </div>
 
-      {/* Tabs superiores */}
-      <div className="glass-panel" style={{ padding: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-        <button 
-          onClick={() => setTab('collect')}
-          className="btn"
-          style={{ 
-            flex: 1, 
-            background: tab === 'collect' ? 'var(--bg-dark)' : 'transparent',
-            borderColor: tab === 'collect' ? 'var(--border-glass)' : 'transparent',
-            color: tab === 'collect' ? 'var(--primary-light)' : 'var(--text-secondary)'
-          }}
-        >
-          Recolección de Campo
-        </button>
-        
-        {isAdmin ? (
+        <div className="glass-panel" style={{ padding: '0.35rem', display: 'flex', gap: '0.25rem' }}>
           <button 
-            onClick={() => setTab('design')}
+            onClick={() => { setTab('collect'); setSelectedSurveyId(null); }}
             className="btn"
             style={{ 
-              flex: 1, 
-              background: tab === 'design' ? 'var(--bg-dark)' : 'transparent',
-              borderColor: tab === 'design' ? 'var(--border-glass)' : 'transparent',
-              color: tab === 'design' ? 'var(--primary-light)' : 'var(--text-secondary)'
+              background: tab === 'collect' ? 'var(--bg-dark)' : 'transparent',
+              borderColor: tab === 'collect' ? 'var(--border-glass)' : 'transparent',
+              color: tab === 'collect' ? 'var(--primary-light)' : 'var(--text-secondary)',
+              fontSize: '0.8rem',
+              padding: '0.4rem 1rem'
             }}
           >
-            Diseñador de Encuestas (Admin)
+            Diligenciar Ficha
           </button>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            <Info size={14} style={{ marginRight: '4px' }} /> Diseñador restringido a administradores
-          </div>
-        )}
+          
+          {isAdmin && (
+            <button 
+              onClick={() => { setTab('design'); setSelectedSurveyId(null); }}
+              className="btn"
+              style={{ 
+                background: tab === 'design' ? 'var(--bg-dark)' : 'transparent',
+                borderColor: tab === 'design' ? 'var(--border-glass)' : 'transparent',
+                color: tab === 'design' ? 'var(--primary-light)' : 'var(--text-secondary)',
+                fontSize: '0.8rem',
+                padding: '0.4rem 1rem'
+              }}
+            >
+              Diseñador (Admin)
+            </button>
+          )}
+        </div>
       </div>
 
       {/* CONTENIDO TAB RECOLECCIÓN */}
       {tab === 'collect' && (
         <div className="dashboard-grid" style={{ gridTemplateColumns: selectedSurveyId ? '1fr 1fr' : '1fr' }}>
+          
           {/* Lista de Encuestas */}
           <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <h3>Formularios de Campo Disponibles</h3>
@@ -222,6 +228,7 @@ export default function Surveys({ currentUser }) {
               {surveys.map(s => {
                 const isSelected = selectedSurveyId === s.id;
                 const respCount = responses.filter(r => r.survey_id === s.id).length;
+                const relIndicator = indicators.find(ind => ind.id === s.indicator_id);
 
                 return (
                   <div 
@@ -234,7 +241,8 @@ export default function Surveys({ currentUser }) {
                       borderColor: isSelected ? 'var(--primary-color)' : 'var(--border-glass)',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between'
+                      justifyContent: 'space-between',
+                      padding: '1.25rem'
                     }}
                   >
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -242,8 +250,23 @@ export default function Surveys({ currentUser }) {
                         <FileText size={20} />
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <strong style={{ color: isSelected ? 'var(--primary-light)' : 'var(--text-primary)' }}>{s.title}</strong>
+                        <strong style={{ color: isSelected ? 'var(--primary-light)' : 'var(--text-primary)', fontSize: '0.95rem' }}>{s.title}</strong>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{s.description}</span>
+                        {/* Indicador Vinculado (Pilar 2) */}
+                        {relIndicator && (
+                          <span 
+                            className="badge" 
+                            style={{ 
+                              background: 'rgba(5, 150, 105, 0.08)', 
+                              color: 'var(--primary-light)', 
+                              fontSize: '0.65rem', 
+                              marginTop: '0.35rem',
+                              width: 'fit-content'
+                            }}
+                          >
+                            Meta: {relIndicator.code} ({relIndicator.unit})
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
@@ -255,123 +278,106 @@ export default function Surveys({ currentUser }) {
             </div>
           </div>
 
-          {/* Formulario Dinámico Activo */}
-          {activeSurvey && (
+          {/* CAPTURA DINÁMICA DE DATOS */}
+          {selectedSurveyId && activeSurvey && (
             <div className="glass-panel" style={{ padding: '2rem' }}>
               {submitSuccess ? (
-                /* Éxito al enviar */
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', padding: '3rem 0' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 0', gap: '1rem' }}>
                   <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--status-online)', padding: '1rem', borderRadius: '50%' }}>
                     <Check size={48} />
                   </div>
-                  <h2>¡Guardado Offline Exitosamente!</h2>
-                  <p style={{ textAlign: 'center' }}>La encuesta se guardó localmente en IndexedDB. Se sincronizará automáticamente al detectar conexión.</p>
+                  <h2>Ficha Guardada Offline</h2>
+                  <p style={{ textAlign: 'center' }}>Los datos se han guardado localmente en IndexedDB. Se subirán al servidor en la próxima sincronización.</p>
                 </div>
               ) : (
-                /* Formulario Real */
                 <form onSubmit={handleSubmitResponse} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <div>
-                    <span className="badge badge-success" style={{ fontSize: '0.65rem', marginBottom: '0.5rem' }}>Llenando Encuesta</span>
-                    <h2>{activeSurvey.title}</h2>
-                    <p style={{ fontSize: '0.85rem' }}>{activeSurvey.description}</p>
-                  </div>
-                  
-                  <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
-
-                  {/* Renderizado Dinámico de Campos */}
-                  {activeSurvey.schema?.fields?.map((field) => {
-                    return (
-                      <div key={field.name} className="form-group">
-                        <label>
-                          {field.label} {field.required && <span style={{ color: '#ef4444' }}>*</span>}
-                        </label>
-                        
-                        {field.type === 'text' && (
-                          <input 
-                            type="text" 
-                            required={field.required}
-                            value={formData[field.name] || ''}
-                            onChange={(e) => handleInputChange(field.name, e.target.value)}
-                            placeholder="Escribe aquí..."
-                          />
-                        )}
-
-                        {field.type === 'number' && (
-                          <input 
-                            type="number" 
-                            required={field.required}
-                            value={formData[field.name] || ''}
-                            onChange={(e) => handleInputChange(field.name, e.target.value)}
-                            placeholder="0"
-                          />
-                        )}
-
-                        {field.type === 'select' && (
-                          <select
-                            required={field.required}
-                            value={formData[field.name] || ''}
-                            onChange={(e) => handleInputChange(field.name, e.target.value)}
-                          >
-                            <option value="">-- Seleccionar --</option>
-                            {field.options?.map(opt => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                        )}
-
-                        {field.type === 'textarea' && (
-                          <textarea
-                            rows="3"
-                            required={field.required}
-                            value={formData[field.name] || ''}
-                            onChange={(e) => handleInputChange(field.name, e.target.value)}
-                            placeholder="Detalles adicionales..."
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* Captura de Coordenadas GPS */}
-                  <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', border: '1px solid var(--border-glass)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <div className="flex-between">
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <MapPin size={16} /> Geolocalización del Reporte
-                      </span>
-                      <button 
-                        type="button" 
-                        onClick={handleGetLocation} 
-                        disabled={isCapturingGps}
-                        className="btn btn-secondary"
-                        style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
-                      >
-                        {isCapturingGps ? 'Obteniendo...' : gpsData.lat ? 'Recapturar' : 'Obtener GPS'}
-                      </button>
+                  <div className="flex-between">
+                    <div>
+                      <h3 style={{ fontSize: '1.1rem' }}>{activeSurvey.title}</h3>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Registro por: {currentUser.email}</span>
                     </div>
-
-                    {gpsData.lat ? (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--primary-light)' }}>
-                        Coordenadas: Latitud <strong>{gpsData.lat}</strong>, Longitud <strong>{gpsData.lng}</strong> (Simulado/Capturado)
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        No se han registrado coordenadas geográficas para este reporte.
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                    <button type="button" onClick={() => setSelectedSurveyId(null)} className="btn btn-secondary" style={{ flex: 1 }}>
+                    <button type="button" onClick={() => setSelectedSurveyId(null)} className="btn btn-secondary" style={{ padding: '0.3rem 0.5rem' }}>
                       Cerrar
                     </button>
-                    <button type="submit" className="btn btn-primary" style={{ flex: 2 }}>
-                      <Send size={16} /> Guardar Respuestas
+                  </div>
+
+                  <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
+
+                  {/* Campos dinámicos del esquema */}
+                  {activeSurvey.schema.fields.map((f, idx) => (
+                    <div className="form-group" key={idx}>
+                      <label>{f.label} {f.required && <span style={{ color: '#ef4444' }}>*</span>}</label>
+                      
+                      {f.type === 'select' ? (
+                        <select 
+                          value={formData[f.name] || ''}
+                          onChange={e => handleInputChange(f.name, e.target.value)}
+                          required={f.required}
+                        >
+                          <option value="">-- Seleccionar opción --</option>
+                          {f.options?.map((opt, oIdx) => (
+                            <option key={oIdx} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : f.type === 'textarea' ? (
+                        <textarea
+                          rows="3"
+                          value={formData[f.name] || ''}
+                          onChange={e => handleInputChange(f.name, e.target.value)}
+                          required={f.required}
+                        />
+                      ) : (
+                        <input
+                          type={f.type === 'number' ? 'number' : 'text'}
+                          value={formData[f.name] || ''}
+                          onChange={e => handleInputChange(f.name, e.target.value)}
+                          required={f.required}
+                        />
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Captura de Coordenadas de Campo (GPS) */}
+                  <div 
+                    className="glass-card" 
+                    style={{ 
+                      background: 'rgba(0,0,0,0.1)', 
+                      padding: '1rem', 
+                      borderRadius: '8px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between',
+                      border: '1px solid var(--border-glass)'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <MapPin size={16} style={{ color: 'var(--primary-light)' }} /> Georreferenciación GPS
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                        {gpsData.lat ? `Lat: ${gpsData.lat.toFixed(6)}, Lng: ${gpsData.lng.toFixed(6)}` : 'Coordenadas no capturadas'}
+                      </div>
+                    </div>
+
+                    <button 
+                      type="button" 
+                      onClick={getGPSCoordinates} 
+                      disabled={isCapturingGps}
+                      className="btn btn-secondary"
+                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}
+                    >
+                      {isCapturingGps ? 'Obteniendo...' : gpsData.lat ? 'Recapturar GPS' : 'Obtener Coordenadas'}
                     </button>
                   </div>
+
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
+                    <Send size={16} /> Guardar Respuestas Offline
+                  </button>
                 </form>
               )}
             </div>
           )}
+
         </div>
       )}
 
@@ -381,6 +387,14 @@ export default function Surveys({ currentUser }) {
           <h2 style={{ marginBottom: '1.25rem' }}>Crear Nueva Plantilla de Encuesta</h2>
           
           <form onSubmit={handleSaveSurveyTemplate} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            
+            {/* Alerta de Error Metodológico */}
+            {designError && (
+              <div style={{ color: '#ef4444', fontSize: '0.85rem', fontWeight: 'bold', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.15)' }}>
+                {designError}
+              </div>
+            )}
+
             <div className="form-group">
               <label>Título de la Encuesta</label>
               <input 
@@ -400,6 +414,21 @@ export default function Surveys({ currentUser }) {
                 value={surveyDesc}
                 onChange={e => setSurveyDesc(e.target.value)}
               />
+            </div>
+
+            {/* Selector de Indicador MEAL (Pilar 2 - Validación Cruzada) */}
+            <div className="form-group">
+              <label>Indicador MEAL Vinculado (Obligatorio para evitar encuestas huérfanas)</label>
+              <select 
+                value={selectedIndicatorId}
+                onChange={e => setSelectedIndicatorId(e.target.value)}
+                required
+              >
+                <option value="">-- Seleccionar Indicador --</option>
+                {indicators.map(ind => (
+                  <option key={ind.id} value={ind.id}>[{ind.code}] {ind.name}</option>
+                ))}
+              </select>
             </div>
 
             <hr style={{ border: 0, borderTop: '1px solid var(--border-glass)' }} />
