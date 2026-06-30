@@ -18,8 +18,9 @@ db.version(1).stores({
 export async function seedLocalData() {
   const projectCount = await db.projects.count();
   const hasWayuu = await db.projects.get('proj-wayuu-001');
+  const hasImpact = await db.logframes.get('lf-wayuu-impact');
   
-  if (projectCount > 0 && hasWayuu) {
+  if (projectCount > 0 && hasWayuu && hasImpact) {
     console.log('El proyecto Guardianes del Mar Wayuu ya está sembrado localmente.');
     return;
   }
