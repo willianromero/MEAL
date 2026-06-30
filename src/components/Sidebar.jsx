@@ -7,15 +7,15 @@ import {
   MessageSquare, 
   BookOpen, 
   ShieldCheck, 
-  Globe 
+  Globe,
+  X
 } from 'lucide-react';
 
-export default function Sidebar({ currentView, setCurrentView, currentUser }) {
-  
-  const userRole = currentUser?.role || 'officer'; // Por defecto: oficial de campo
+export default function Sidebar({ currentView, setCurrentView, currentUser, isMobileOpen, onClose }) {
+  const userRole = currentUser?.role || 'officer';
   const userEmail = currentUser?.email || 'anonimo@meal.org';
 
-  // Mapeo de vistas disponibles y roles requeridos
+  // Mapeo de vistas y roles permitidos
   const navItems = [
     { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} />, roles: ['admin', 'officer', 'viewer'] },
     { id: 'projects', name: 'Proyectos & LogFrames', icon: <Briefcase size={18} />, roles: ['admin', 'officer', 'viewer'] },
@@ -26,7 +26,6 @@ export default function Sidebar({ currentView, setCurrentView, currentUser }) {
     { id: 'auth', name: 'Sesión y Simulación', icon: <ShieldCheck size={18} />, roles: ['admin', 'officer', 'viewer'] }
   ];
 
-  // Traducir rol al español para mostrar en la interfaz
   const getRoleLabel = (role) => {
     switch (role) {
       case 'admin': return 'Administrador';
@@ -38,33 +37,38 @@ export default function Sidebar({ currentView, setCurrentView, currentUser }) {
 
   const getRoleBadgeColor = (role) => {
     switch (role) {
-      case 'admin': return 'rgba(239, 68, 68, 0.2)'; // Rojo semi
-      case 'officer': return 'rgba(5, 150, 105, 0.2)'; // Esmeralda semi
-      case 'viewer': return 'rgba(14, 165, 233, 0.2)'; // Azul semi
-      default: return 'rgba(255,255,255,0.1)';
+      case 'admin': return 'rgba(239, 68, 68, 0.12)';
+      case 'officer': return 'rgba(5, 150, 105, 0.12)';
+      case 'viewer': return 'rgba(14, 165, 233, 0.12)';
+      default: return 'rgba(255,255,255,0.05)';
     }
   };
 
   return (
-    <aside 
-      className="glass-panel" 
-      style={{ 
-        position: 'fixed', 
-        top: 0, 
-        left: 0, 
-        bottom: 0, 
-        width: '260px', 
-        borderRadius: 0, 
-        borderRight: '1px solid var(--border-glass)', 
-        borderTop: 'none',
-        borderBottom: 'none',
-        borderLeft: 'none',
-        display: 'flex', 
-        flexDirection: 'column', 
-        zIndex: 100,
-        padding: '1.5rem 1rem'
-      }}
-    >
+    <aside className={`glass-panel sidebar-layout ${isMobileOpen ? 'open' : ''}`}>
+      {/* Botón para cerrar menú móvil */}
+      {isMobileOpen && (
+        <button
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: '1.25rem',
+            right: '1rem',
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          title="Cerrar menú"
+        >
+          <X size={20} />
+        </button>
+      )}
+
       {/* Brand Logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem', padding: '0.5rem' }}>
         <div style={{ 
@@ -75,24 +79,23 @@ export default function Sidebar({ currentView, setCurrentView, currentUser }) {
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center',
-          boxShadow: '0 4px 10px rgba(5,150,105,0.3)'
+          boxShadow: '0 4px 10px rgba(5,150,105,0.2)'
         }}>
           <Globe size={20} color="white" />
         </div>
         <div>
-          <span style={{ fontSize: '1.25rem', fontWeight: 800, background: 'linear-gradient(135deg, #a7f3d0 0%, #2dd4bf 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <span style={{ fontSize: '1.15rem', fontWeight: 800, background: 'linear-gradient(135deg, var(--primary-light) 0%, var(--secondary-light) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             MEAL System
           </span>
           <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 'bold' }}>
-            Offline-First v1.0
+            Guardianes Wayuu
           </div>
         </div>
       </div>
 
-      {/* Navigation Links */}
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
+      {/* Navegación */}
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
         {navItems.map((item) => {
-          // Filtrar por rol de usuario
           const hasAccess = item.roles.includes(userRole);
           if (!hasAccess) return null;
 
@@ -101,17 +104,20 @@ export default function Sidebar({ currentView, setCurrentView, currentUser }) {
           return (
             <button
               key={item.id}
-              onClick={() => setCurrentView(item.id)}
+              onClick={() => {
+                setCurrentView(item.id);
+                if (onClose) onClose(); // Auto cerrar menú al hacer clic en móvil
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '1rem',
+                gap: '0.85rem',
                 width: '100%',
-                padding: '0.75rem 1rem',
+                padding: '0.65rem 0.85rem',
                 border: '1px solid transparent',
-                borderRadius: '10px',
-                background: isActive ? 'rgba(5, 150, 105, 0.15)' : 'transparent',
-                borderColor: isActive ? 'rgba(5, 150, 105, 0.25)' : 'transparent',
+                borderRadius: '8px',
+                background: isActive ? 'rgba(5, 150, 105, 0.12)' : 'transparent',
+                borderColor: isActive ? 'rgba(5, 150, 105, 0.2)' : 'transparent',
                 color: isActive ? 'var(--primary-light)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 textAlign: 'left',
@@ -120,62 +126,63 @@ export default function Sidebar({ currentView, setCurrentView, currentUser }) {
               }}
             >
               {item.icon}
-              <span style={{ fontSize: '0.9rem' }}>{item.name}</span>
+              <span style={{ fontSize: '0.85rem' }}>{item.name}</span>
             </button>
           );
         })}
       </nav>
 
-      {/* User Info & Role Simulation */}
+      {/* Información del perfil */}
       <div 
         className="glass-card" 
         style={{ 
           marginTop: 'auto', 
-          padding: '1rem', 
-          background: 'rgba(15, 23, 42, 0.5)', 
+          padding: '0.85rem', 
+          background: 'var(--bg-card-inner)', 
           border: '1px solid var(--border-glass)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '0.5rem'
+          gap: '0.4rem'
         }}
       >
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={userEmail}>
-          Sesión: {userEmail}
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={userEmail}>
+          Usuario: {userEmail}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.25rem' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Rol:</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Rol:</span>
           <span 
             className="badge" 
             style={{ 
               background: getRoleBadgeColor(userRole),
               color: userRole === 'admin' ? '#fca5a5' : userRole === 'officer' ? '#a7f3d0' : '#e0f2fe',
-              border: `1px solid ${userRole === 'admin' ? 'rgba(239, 68, 68, 0.4)' : userRole === 'officer' ? 'rgba(5, 150, 105, 0.4)' : 'rgba(14, 165, 233, 0.4)'}`,
-              padding: '0.15rem 0.5rem', 
-              fontSize: '0.7rem' 
+              border: `1px solid ${userRole === 'admin' ? 'rgba(239, 68, 68, 0.25)' : userRole === 'officer' ? 'rgba(5, 150, 105, 0.25)' : 'rgba(14, 165, 233, 0.25)'}`,
+              padding: '0.1rem 0.4rem', 
+              fontSize: '0.65rem' 
             }}
           >
             {getRoleLabel(userRole)}
           </span>
         </div>
         
-        {/* Atajo rápido para simular rol alternativo */}
         <button
-          onClick={() => setCurrentView('auth')}
+          onClick={() => {
+            setCurrentView('auth');
+            if (onClose) onClose();
+          }}
           style={{
-            marginTop: '0.5rem',
+            marginTop: '0.4rem',
             width: '100%',
-            padding: '0.4rem',
-            fontSize: '0.75rem',
-            background: 'rgba(255,255,255,0.05)',
+            padding: '0.35rem',
+            fontSize: '0.7rem',
+            background: 'rgba(255,255,255,0.03)',
             border: '1px solid var(--border-glass)',
             borderRadius: '6px',
             color: 'var(--text-secondary)',
             cursor: 'pointer',
-            fontWeight: '600',
-            textAlign: 'center'
+            fontWeight: '600'
           }}
         >
-          Cambiar Simulación
+          Simular otro Rol
         </button>
       </div>
     </aside>
