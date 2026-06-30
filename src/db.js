@@ -14,210 +14,328 @@ db.version(1).stores({
   sync_meta: 'key, value'
 });
 
-// Función para inicializar datos semilla locales si la base de datos está vacía
+// Función para inicializar datos semilla de Guardianes del Mar Wayuu
 export async function seedLocalData() {
+  // Primero limpiamos los datos semilla anteriores para evitar confusiones en las pruebas reales
   const projectCount = await db.projects.count();
-  if (projectCount > 0) return; // Ya hay datos, no re-sembrar
-
-  console.log('Sembrando datos locales iniciales en Dexie...');
-
-  // 1. Proyectos Semilla
-  const p1_id = 'e7b08b3e-e6bf-4632-9b2f-1aef201c1001';
-  const p2_id = 'e7b08b3e-e6bf-4632-9b2f-1aef201c1002';
+  const hasWayuu = await db.projects.get('proj-wayuu-001');
   
+  if (projectCount > 0 && hasWayuu) {
+    console.log('El proyecto Guardianes del Mar Wayuu ya está sembrado localmente.');
+    return;
+  }
+
+  console.log('Sembrando datos del proyecto "Guardianes del Mar Wayuu" en Dexie...');
+  
+  // Limpiar para asegurar reinicio limpio en pruebas funcionales
+  await db.projects.clear();
+  await db.logframes.clear();
+  await db.indicators.clear();
+  await db.surveys.clear();
+  await db.survey_responses.clear();
+  await db.feedbacks.clear();
+  await db.lessons_learned.clear();
+  await db.sync_meta.clear();
+
   const now = new Date().toISOString();
+  const projId = 'proj-wayuu-001';
 
-  await db.projects.bulkAdd([
-    {
-      id: p1_id,
-      name: 'Acceso Seguro al Agua Potable y Saneamiento (ASAPS)',
-      description: 'Proyecto orientado a construir sistemas de recolección de agua y letrinas en comunidades rurales vulnerables.',
-      start_date: '2026-01-01',
-      end_date: '2026-12-31',
-      status: 'active',
-      updated_at: now
-    },
-    {
-      id: p2_id,
-      name: 'Seguridad Alimentaria y Huertos Familiares Urbanos',
-      description: 'Establecimiento de huertos urbanos comunitarios para mejorar la nutrición familiar en zonas vulnerables.',
-      start_date: '2026-03-01',
-      end_date: '2026-11-30',
-      status: 'active',
-      updated_at: now
-    }
-  ]);
+  // 1. Proyecto Principal
+  await db.projects.add({
+    id: projId,
+    name: 'Guardianes del Mar Wayuu',
+    description: 'Fortalecimiento pesquero artesanal y desarrollo de experiencias turísticas comunitarias sostenibles en Mayapo y El Pájaro, Manaure, La Guajira.',
+    start_date: '2026-06-01',
+    end_date: '2027-04-01', // 10 meses
+    status: 'active',
+    updated_at: now
+  });
 
-  // 2. Marcos Lógicos Semilla (LogFrames)
-  const lf1_out1 = 'lf-101';
-  const lf1_act1 = 'lf-102';
-  const lf2_out1 = 'lf-201';
-  const lf2_act1 = 'lf-202';
+  // 2. Marcos Lógicos (LogFrames basados en los objetivos específicos)
+  const lf_out1 = 'lf-wayuu-out1'; // Gobernanza
+  const lf_out2 = 'lf-wayuu-out2'; // Productivo/Seguridad
+  const lf_out3 = 'lf-wayuu-out3'; // Turismo
+  const lf_out4 = 'lf-wayuu-out4'; // Comercial/Sostenibilidad
 
   await db.logframes.bulkAdd([
-    // Proyecto 1
+    // Resultado 1: Gobernanza
     {
-      id: lf1_out1,
-      project_id: p1_id,
+      id: lf_out1,
+      project_id: projId,
       type: 'outcome',
       code: 'R-1',
-      description: 'Las familias participantes cuentan con acceso regular a agua libre de contaminantes.',
+      description: 'Fortalecimiento de la gobernanza, planeación asociativa y capacidades organizacionales de las comunidades pesqueras Wayuu.',
       parent_id: null,
       updated_at: now
     },
     {
-      id: lf1_act1,
-      project_id: p1_id,
+      id: 'lf-wayuu-act1.1',
+      project_id: projId,
       type: 'activity',
       code: 'A-1.1',
-      description: 'Instalación de 50 sistemas familiares de recolección y filtrado de agua de lluvia.',
-      parent_id: lf1_out1,
+      description: 'Socialización territorial y concertación del proyecto en idioma Wayuunaiki con autoridades tradicionales y asociaciones.',
+      parent_id: lf_out1,
       updated_at: now
     },
-    // Proyecto 2
     {
-      id: lf2_out1,
-      project_id: p2_id,
+      id: 'lf-wayuu-act1.2',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-1.2',
+      description: 'Campaña de caracterización socioeconómica individual de pescadores y diagnóstico asociativo base en el primer mes.',
+      parent_id: lf_out1,
+      updated_at: now
+    },
+
+    // Resultado 2: Productivo
+    {
+      id: lf_out2,
+      project_id: projId,
       type: 'outcome',
-      code: 'R-1',
-      description: 'Familias incrementan su consumo diario de hortalizas frescas cultivadas localmente.',
+      code: 'R-2',
+      description: 'Mejoramiento de las capacidades productivas pesqueras, cadena de frío, inocuidad alimentaria (HSE) y seguridad marítima.',
       parent_id: null,
       updated_at: now
     },
     {
-      id: lf2_act1,
-      project_id: p2_id,
+      id: 'lf-wayuu-act2.1',
+      project_id: projId,
       type: 'activity',
-      code: 'A-1.1',
-      description: 'Entrega de kits de siembra y capacitación presencial a 120 jefas de hogar.',
-      parent_id: lf2_out1,
+      code: 'A-2.1',
+      description: 'Entrega de activos estratégicos de conservación, refrigeración y postcaptura pesquera.',
+      parent_id: lf_out2,
+      updated_at: now
+    },
+    {
+      id: 'lf-wayuu-act2.2',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-2.2',
+      description: 'Dotación de equipos de seguridad náutica y capacitación bajo parámetros de la DIMAR.',
+      parent_id: lf_out2,
+      updated_at: now
+    },
+
+    // Resultado 3: Turismo
+    {
+      id: lf_out3,
+      project_id: projId,
+      type: 'outcome',
+      code: 'R-3',
+      description: 'Estructuración y diseño del portafolio de experiencias de pescaturismo y patrimonio inmaterial Wayuu.',
+      parent_id: null,
+      updated_at: now
+    },
+    {
+      id: 'lf-wayuu-act3.1',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-3.1',
+      description: 'Diseño técnico de las 5 propuestas de experiencias turísticas y evaluación competitiva mediante Pitch Vivencial.',
+      parent_id: lf_out3,
+      updated_at: now
+    },
+    {
+      id: 'lf-wayuu-act3.2',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-3.2',
+      description: 'Ejecución de validaciones operativas y viajes de familiarización (FAM TRIP) con agencias turísticas.',
+      parent_id: lf_out3,
+      updated_at: now
+    },
+
+    // Resultado 4: Comercialización
+    {
+      id: lf_out4,
+      project_id: projId,
+      type: 'outcome',
+      code: 'R-4',
+      description: 'Articulación comercial (Modelo B2B) y mecanismos de sostenibilidad financiera comunitaria.',
+      parent_id: null,
+      updated_at: now
+    },
+    {
+      id: 'lf-wayuu-act4.1',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-4.1',
+      description: 'Formalización de alianzas estratégicas con operadores de la cadena de valor turística regional.',
+      parent_id: lf_out4,
+      updated_at: now
+    },
+    {
+      id: 'lf-wayuu-act4.2',
+      project_id: projId,
+      type: 'activity',
+      code: 'A-4.2',
+      description: 'Adopción de acuerdos comunitarios y constitución de fondos de ahorro y reinversión para mantenimiento de activos.',
+      parent_id: lf_out4,
       updated_at: now
     }
   ]);
 
-  // 3. Indicadores Semilla
+  // 3. Indicadores Oficiales de la Propuesta (Sección 9)
   await db.indicators.bulkAdd([
-    // Proyecto 1
     {
-      id: 'ind-101',
-      project_id: p1_id,
-      logframe_id: lf1_out1,
+      id: 'ind-wayuu-101',
+      project_id: projId,
+      logframe_id: lf_out1,
       code: 'IND-1.1',
-      name: 'Número de letrinas sanitarias construidas y en funcionamiento',
-      unit: 'Letrinas',
+      name: 'Personas que culminan los ciclos de formación en turismo, inocuidad y pesca',
+      unit: 'Participantes',
       baseline: 0,
-      target: 50,
-      actual: 18,
+      target: 100,
+      actual: 15, // Supongamos un avance inicial de socialización
       updated_at: now
     },
     {
-      id: 'ind-102',
-      project_id: p1_id,
-      logframe_id: lf1_act1,
+      id: 'ind-wayuu-102',
+      project_id: projId,
+      logframe_id: lf_out1,
       code: 'IND-1.2',
-      name: 'Porcentaje de familias con acceso directo a agua potable',
-      unit: 'Porcentaje',
-      baseline: 15,
-      target: 90,
-      actual: 35,
+      name: 'Asociaciones de pescadores fortalecidas en gobernanza comunitaria y administración',
+      unit: 'Asociaciones',
+      baseline: 0,
+      target: 5,
+      actual: 2, // 2 asociaciones ya iniciaron diagnósticos asociativos
       updated_at: now
     },
-    // Proyecto 2
     {
-      id: 'ind-201',
-      project_id: p2_id,
-      logframe_id: lf2_out1,
+      id: 'ind-wayuu-201',
+      project_id: projId,
+      logframe_id: lf_out2,
       code: 'IND-2.1',
-      name: 'Huertos comunitarios implementados y activos',
-      unit: 'Huertos',
+      name: 'Asociaciones pesqueras dotadas de activos productivos de conservación y seguridad marítima',
+      unit: 'Asociaciones',
       baseline: 0,
-      target: 10,
-      actual: 4,
+      target: 2,
+      actual: 0,
       updated_at: now
     },
     {
-      id: 'ind-202',
-      project_id: p2_id,
-      logframe_id: lf2_act1,
-      code: 'IND-2.2',
-      name: 'Número de personas capacitadas en técnicas agroecológicas',
-      unit: 'Personas',
+      id: 'ind-wayuu-301',
+      project_id: projId,
+      logframe_id: lf_out3,
+      code: 'IND-3.1',
+      name: 'Propuestas de experiencias turísticas comunitarias estructuradas y costeadas',
+      unit: 'Propuestas',
       baseline: 0,
-      target: 120,
-      actual: 45,
+      target: 5,
+      actual: 1, // Una primera propuesta borrador en Mayapo
+      updated_at: now
+    },
+    {
+      id: 'ind-wayuu-302',
+      project_id: projId,
+      logframe_id: lf_out3,
+      code: 'IND-3.2',
+      name: 'Experiencias de pescaturismo fortalecidas, validadas en campo e implementadas',
+      unit: 'Experiencias',
+      baseline: 0,
+      target: 2,
+      actual: 0,
+      updated_at: now
+    },
+    {
+      id: 'ind-wayuu-401',
+      project_id: projId,
+      logframe_id: lf_out4,
+      code: 'IND-4.1',
+      name: 'Alianzas o acuerdos de articulación comercial establecidos con operadores (B2B)',
+      unit: 'Alianzas',
+      baseline: 0,
+      target: 4,
+      actual: 0,
+      updated_at: now
+    },
+    {
+      id: 'ind-wayuu-402',
+      project_id: projId,
+      logframe_id: lf_out4,
+      code: 'IND-4.2',
+      name: 'Mecanismos comunitarios de ahorro y fondos de reinversión adoptados formalmente',
+      unit: 'Mecanismos',
+      baseline: 0,
+      target: 2,
+      actual: 0,
       updated_at: now
     }
   ]);
 
-  // 4. Plantillas de Encuestas Semilla
+  // 4. Plantillas de Encuesta adaptadas al proyecto Wayuu
   await db.surveys.bulkAdd([
     {
-      id: 'srv-101',
-      title: 'Monitoreo Técnico de Agua y Saneamiento',
-      description: 'Formulario técnico para registrar el estado de los tanques de agua instalados y satisfacción del usuario.',
+      id: 'srv-wayuu-101',
+      title: 'Ficha de Caracterización y Diagnóstico Socioeconómico (Mes 1)',
+      description: 'Formulario oficial de caracterización socioeconómica individual para el censo de pescadores artesanales en Mayapo y El Pájaro.',
       schema: {
         fields: [
-          { name: 'beneficiary_name', label: 'Nombre del Beneficiario', type: 'text', required: true },
-          { name: 'family_members', label: 'Cantidad de miembros en el hogar', type: 'number', required: true },
-          { name: 'tank_status', label: 'Estado del Filtro/Tanque de Agua', type: 'select', options: ['Excelente', 'Bueno', 'Requiere Mantenimiento', 'No Funciona'], required: true },
-          { name: 'water_taste', label: '¿El agua tiene sabor u olor extraño?', type: 'select', options: ['No, totalmente limpia', 'Sí, sabor metálico/tierra', 'Sí, turbia'], required: false },
-          { name: 'comments', label: 'Observaciones Técnicas', type: 'textarea', required: false }
+          { name: 'full_name', label: 'Nombre Completo del Pescador', type: 'text', required: true },
+          { name: 'clan', label: 'Clan Wayuu de pertenencia (ej. Pushaina, Uriana, Epinayu)', type: 'text', required: true },
+          { name: 'location', label: 'Corregimiento / Comunidad de Residencia', type: 'select', options: ['Mayapo', 'El Pájaro', 'Ranchería Aledaña Mayapo', 'Ranchería Aledaña El Pájaro'], required: true },
+          { name: 'association', label: 'Asociación de Pescadores a la que pertenece', type: 'select', options: ['Asociación de Mayapo A', 'Asociación de Mayapo B', 'Asociación de El Pájaro A', 'Independiente / No asociado'], required: true },
+          { name: 'family_count', label: 'Miembros dependientes en el núcleo familiar', type: 'number', required: true },
+          { name: 'fishing_only', label: '¿Es la pesca artesanal su única fuente de ingresos?', type: 'select', options: ['Sí, dependemos 100% de la pesca', 'No, alternamos con pastoreo/artesanías', 'No, alternamos con mototaxismo o comercio'], required: true },
+          { name: 'boat_motor', label: '¿Cuenta con embarcación y motor propio en buen estado?', type: 'select', options: ['Embarcación y motor propios operativos', 'Embarcación propia pero sin motor', 'No tiene activos propios (pesca de orilla)', 'Usa activos alquilados/prestados'], required: true },
+          { name: 'comments', label: 'Observaciones generales del diagnóstico', type: 'textarea', required: false }
         ]
       },
-      created_by: 'system',
+      created_by: 'coordinacion@guajiracompetitiva.org',
       updated_at: now
     },
     {
-      id: 'srv-102',
-      title: 'Registro de Capacitación de Huertos Familiares',
-      description: 'Encuesta corta para evaluar la asimilación del taller práctico de siembra y entrega de kits.',
+      id: 'srv-wayuu-102',
+      title: 'Evaluación del FAM TRIP y Satisfacción Comercial (Metas 9.6)',
+      description: 'Encuesta técnica para evaluar la viabilidad operativa y comercial de las experiencias piloto de pescaturismo con agencias de viaje.',
       schema: {
         fields: [
-          { name: 'participant_name', label: 'Nombre del Participante', type: 'text', required: true },
-          { name: 'gender', label: 'Género del Participante', type: 'select', options: ['Femenino', 'Masculino', 'Otro'], required: true },
-          { name: 'kit_received', label: '¿Recibió el kit completo de herramientas y semillas?', type: 'select', options: ['Sí, completo', 'Incompleto', 'No recibió'], required: true },
-          { name: 'understanding_score', label: 'Nivel de comprensión de la capacitación (1 al 5)', type: 'number', required: true },
-          { name: 'challenges', label: '¿Cuáles son los principales desafíos identificados para su huerto?', type: 'textarea', required: false }
+          { name: 'agency_name', label: 'Agencia de Viajes / Operadora Turística', type: 'text', required: true },
+          { name: 'route_evaluated', label: 'Experiencia Turística Evaluada', type: 'select', options: ['Pesca Ancestral Wayuu en Mayapo', 'Ruta de la Tortuga y Gastronomía en El Pájaro'], required: true },
+          { name: 'cultural_respect', label: 'Nivel de pertinencia y respeto cultural Wayuu (1 al 5)', type: 'number', required: true },
+          { name: 'safety_equipment', label: '¿Se constató el uso de chalecos salvavidas y equipos náuticos de seguridad?', type: 'select', options: ['Sí, todo el equipamiento reglamentario', 'Parcialmente (faltaban algunos chalecos)', 'No contaban con equipos de seguridad marítima'], required: true },
+          { name: 'commercial_potential', label: 'Potencial de inserción en el portafolio B2B de su agencia', type: 'select', options: ['Alto potencial, listos para firmar acuerdo', 'Medio potencial, requiere ajustes de costo/tiempos', 'Bajo potencial, no se adapta a nuestro público'], required: true },
+          { name: 'improvement_points', label: 'Recomendaciones de mejora operativa identificadas', type: 'textarea', required: false }
         ]
       },
-      created_by: 'system',
+      created_by: 'coordinacion@guajiracompetitiva.org',
       updated_at: now
     }
   ]);
 
-  // 5. Quejas y Sugerencias Semilla
+  // 5. Quejas y Sugerencias de comunidades Wayuu
   await db.feedbacks.bulkAdd([
     {
-      id: 'fb-101',
-      project_id: p1_id,
+      id: 'fb-wayuu-101',
+      project_id: projId,
       category: 'complaint',
-      details: 'El sistema de filtrado instalado en el Sector 3 presenta una fisura en el grifo secundario y gotea constantemente.',
-      contact_info: 'Maria Gomez, Tel: 555-0199',
+      details: 'Pescadores de la zona norte de Mayapo reportan que la marea alta ha socavado los postes de amarre y solicitan priorizar el estudio de geolocalización de puntos de embarque.',
+      contact_info: 'Líder Gelasio Uriana, Cel: 312-445588',
       status: 'pending',
       updated_at: now,
       sync_status: 'synced'
     },
     {
-      id: 'fb-102',
-      project_id: p2_id,
+      id: 'fb-wayuu-102',
+      project_id: projId,
       category: 'suggestion',
-      details: 'Sería de gran utilidad programar la capacitación de compostaje orgánico los fines de semana, ya que muchas participantes trabajan entre semana.',
-      contact_info: 'Anonimo',
+      details: 'Sugerimos que los talleres de servicio al cliente del SENA se dicten en la tarde en el Centro de Mayapo, para evitar cruces con la jornada de pesca matutina.',
+      contact_info: 'Asociación Mar del Cabo',
       status: 'under_review',
       updated_at: now,
       sync_status: 'synced'
     }
   ]);
 
-  // 6. Lecciones Aprendidas Semilla
+  // 6. Lecciones Aprendidas de Proyectos Anteriores (Ruta Jemeilli y Turismo Emprende)
   await db.lessons_learned.bulkAdd([
     {
-      id: 'll-101',
-      project_id: p1_id,
-      title: 'Alineación de tiempos con temporadas de lluvia',
-      description: 'La entrega de tanques de recolección de agua pluvial debe completarse al menos un mes antes del inicio previsto de las lluvias.',
-      challenges: 'Se entregaron tanques tarde y las primeras lluvias torrenciales lavaron los cimientos inacabados de 3 tanques en terreno inclinado.',
-      recommendations: 'Avanzar los cimientos de concreto en época seca (diciembre-enero) y montar los tanques justo al iniciar las lluvias.',
+      id: 'll-wayuu-101',
+      project_id: projId,
+      title: 'Estandarización de tarifas netas para el canal B2B',
+      description: 'Durante la operación piloto de la Ruta Ancestral Jemeilli, se evidenció que las agencias mayoristas exigen tarifas netas fijas anualizadas con al menos 20% de comisión garantizada y seguros de accidentes activos.',
+      challenges: 'Las asociaciones comunitarias cambiaban los costos de los almuerzos de mariscos semanalmente según el precio de mercado, rompiendo reservas previas de agencias asociadas.',
+      recommendations: 'Establecer acuerdos de costos fijos estacionales por semestre con las asociaciones y contratar pólizas colectivas anuales desde el mes de diseño del producto turístico.',
       updated_at: now,
       sync_status: 'synced'
     }
@@ -229,5 +347,5 @@ export async function seedLocalData() {
     { key: 'network_mode', value: 'online' }
   ]);
 
-  console.log('Sembrado de Dexie finalizado.');
+  console.log('Sembrado de datos del proyecto "Guardianes del Mar Wayuu" completado con éxito.');
 }
