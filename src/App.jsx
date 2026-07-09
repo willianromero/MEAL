@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { seedLocalData } from './db';
 import Sidebar from './components/Sidebar';
 import SyncIndicator from './components/SyncIndicator';
+import TenantSelector from './components/TenantSelector';
+import { TenantProvider } from './context/TenantContext';
 import { Menu, Sun, Moon } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
@@ -14,6 +16,15 @@ import Feedback from './views/Feedback';
 import Lessons from './views/Lessons';
 import Auth from './views/Auth';
 import Users from './views/Users'; // Panel administrativo de usuarios
+import Catalog from './views/Catalog';
+import TenantAdmin from './views/TenantAdmin';
+import FieldCapture from './views/FieldCapture';
+import FormBuilder from './views/FormBuilder';
+import Validation from './views/Validation';
+import Beneficiaries from './views/Beneficiaries';
+import AuditLog from './views/AuditLog';
+import Repository from './views/Repository';
+import Reports from './views/Reports';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -153,8 +164,26 @@ export default function App() {
         return <Dashboard setCurrentView={setCurrentView} />;
       case 'projects':
         return <Projects currentUser={activeUser} />;
+      case 'catalog':
+        return <Catalog currentUser={activeUser} />;
+      case 'tenants':
+        return <TenantAdmin currentUser={activeUser} />;
       case 'indicators':
         return <Indicators currentUser={activeUser} />;
+      case 'capture':
+        return <FieldCapture currentUser={activeUser} />;
+      case 'formbuilder':
+        return <FormBuilder currentUser={activeUser} />;
+      case 'validation':
+        return <Validation currentUser={activeUser} />;
+      case 'beneficiaries':
+        return <Beneficiaries currentUser={activeUser} />;
+      case 'audit':
+        return <AuditLog />;
+      case 'repository':
+        return <Repository />;
+      case 'reports':
+        return <Reports currentUser={activeUser} />;
       case 'surveys':
         return <Surveys currentUser={activeUser} />;
       case 'feedback':
@@ -162,7 +191,9 @@ export default function App() {
       case 'lessons':
         return <Lessons currentUser={activeUser} />;
       case 'users':
-        return activeUser && activeUser.role === 'admin' ? <Users /> : <Dashboard setCurrentView={setCurrentView} />;
+        // El acceso real lo gobierna la capacidad MANAGE_USERS en el Sidebar y
+        // las políticas RLS del backend; aquí solo enrutamos.
+        return activeUser ? <Users /> : <Dashboard setCurrentView={setCurrentView} />;
       case 'auth':
         return <Auth currentUser={activeUser} setCurrentUser={setCurrentUser} />;
       default:
@@ -171,18 +202,19 @@ export default function App() {
   };
 
   return (
+    <TenantProvider currentUser={activeUser}>
     <div className="app-container">
       {/* 1. Barra superior para móviles */}
       <div className="mobile-topbar">
-        <button 
+        <button
           onClick={() => setIsMobileMenuOpen(true)}
           style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
         >
           <Menu size={24} />
         </button>
-        
+
         <span style={{ fontWeight: 800, fontSize: '1.1rem', background: 'linear-gradient(135deg, #10b981 0%, #0d9488 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          MEAL Guardianes
+          Plataforma MEAL
         </span>
 
         <button 
@@ -221,11 +253,12 @@ export default function App() {
       
       {/* 4. Contenido Principal */}
       <main className="main-content">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', width: '100%' }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', width: '100%', flexWrap: 'wrap' }}>
+          {activeUser && <TenantSelector />}
+          <div style={{ flex: 1, minWidth: '200px' }}>
             <SyncIndicator />
           </div>
-          
+
           <button
             onClick={toggleTheme}
             className="btn btn-secondary"
@@ -250,5 +283,6 @@ export default function App() {
         </div>
       </main>
     </div>
+    </TenantProvider>
   );
 }

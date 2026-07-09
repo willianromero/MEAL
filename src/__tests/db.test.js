@@ -1,86 +1,130 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-// Mockear el módulo Dexie como una clase constructora formal de ES6
-vi.mock('dexie', () => {
-  const mockTable = {
-    add: vi.fn(() => Promise.resolve('ok')),
-    put: vi.fn(() => Promise.resolve('ok')),
-    get: vi.fn(() => Promise.resolve(null)),
-    toArray: vi.fn(() => Promise.resolve([])),
-    count: vi.fn(() => Promise.resolve(0)),
-    clear: vi.fn(() => Promise.resolve()),
-    bulkAdd: vi.fn(() => Promise.resolve()),
-    where: vi.fn(() => ({
-      equals: vi.fn(() => ({
-        count: vi.fn(() => Promise.resolve(0)),
-        toArray: vi.fn(() => Promise.resolve([]))
-      }))
-    }))
-  };
+// Nombres de tabla usados por las aserciones (el mock los redefine internamente
+// porque vi.mock se eleva por encima de las variables del módulo).
+const TABLE_NAMES = [
+  'tenants', 'memberships', 'profiles', 'units', 'program_lines', 'projects',
+  'logframes', 'indicators', 'indicator_values', 'forms', 'field_records',
+  'evidences', 'beneficiaries', 'consents', 'surveys', 'survey_responses',
+  'feedbacks', 'lessons_learned', 'audit_log', 'sync_meta'
+];
 
+vi.mock('dexie', () => {
+  const names = [
+    'tenants', 'memberships', 'profiles', 'units', 'program_lines', 'projects',
+    'logframes', 'indicators', 'indicator_values', 'forms', 'field_records',
+    'evidences', 'beneficiaries', 'consents', 'surveys', 'survey_responses',
+    'feedbacks', 'lessons_learned', 'audit_log', 'sync_meta'
+  ];
+  const mkTable = () => {
+    const rows = new Map();
+    return {
+      _rows: rows,
+      add: vi.fn(async (r) => { rows.set(r.id, r); return r.id; }),
+      put: vi.fn(async (r) => { rows.set(r.id, r); return r.id; }),
+      bulkAdd: vi.fn(async (arr) => { arr.forEach(r => rows.set(r.id, r)); }),
+      bulkPut: vi.fn(async (arr) => { arr.forEach(r => rows.set(r.id, r)); }),
+      get: vi.fn(async (id) => rows.get(id) || null),
+      count: vi.fn(async () => rows.size),
+      clear: vi.fn(async () => rows.clear()),
+      toArray: vi.fn(async () => [...rows.values()]),
+      where: vi.fn(() => ({
+        equals: vi.fn(() => ({
+          count: vi.fn(async () => 0),
+          toArray: vi.fn(async () => [])
+        }))
+      }))
+    };
+  };
   class MockDexie {
     constructor() {
-      this.version = vi.fn().mockReturnThis();
-      this.stores = vi.fn().mockReturnThis();
-      this.projects = mockTable;
-      this.logframes = mockTable;
-      this.indicators = mockTable;
-      this.surveys = mockTable;
-      this.survey_responses = mockTable;
-      this.feedbacks = mockTable;
-      this.lessons_learned = mockTable;
-      this.sync_meta = mockTable;
+      const versionChain = {
+        stores: vi.fn(() => versionChain),
+        upgrade: vi.fn(() => versionChain)
+      };
+      this.version = vi.fn(() => versionChain);
+      names.forEach(name => { this[name] = mkTable(); });
     }
   }
-
-  return {
-    default: MockDexie,
-    Dexie: MockDexie,
-    mockTableInstance: mockTable
-  };
+  return { default: MockDexie, Dexie: MockDexie };
 });
 
-// Importar db y el inicializador semilla
-import { db, seedLocalData } from '../db';
+import { db, seedLocalData, calculateRecordHash, logAudit } from '../db';
 
-describe('Pruebas unitarias de base de datos local (Dexie.js Mock)', () => {
+describe('Base de datos local multi-tenant (Dexie v2 mock)', () => {
   beforeEach(() => {
+    // Vaciar el almacenamiento en memoria de cada tabla antes de cada prueba
+    TABLE_NAMES.forEach(name => db[name]._rows.clear());
     vi.clearAllMocks();
   });
 
-  it('Debería inicializar las tablas de IndexedDB con sus nombres correctos', () => {
-    expect(db.projects).toBeDefined();
-    expect(db.indicators).toBeDefined();
-    expect(db.surveys).toBeDefined();
-    expect(db.feedbacks).toBeDefined();
+  it('Debería exponer todas las tablas del esquema multi-tenant', () => {
+    expect(db.tenants).toBeDefined();
+    expect(db.units).toBeDefined();
+    expect(db.field_records).toBeDefined();
+    expect(db.audit_log).toBeDefined();
+    expect(db.consents).toBeDefined();
   });
 
-  it('Debería sembrar datos iniciales si el contador de proyectos es 0', async () => {
-    // Simular base de datos vacía
-    db.projects.count.mockResolvedValueOnce(0);
-    db.projects.get.mockResolvedValueOnce(null);
-    db.logframes.get.mockResolvedValueOnce(null);
-
+  it('Debería sembrar los 3 tenants de configuración cuando la BD está vacía', async () => {
     await seedLocalData();
 
-    // Comprobar que se llamó a add/bulkAdd para poblar proyectos y otras tablas
-    expect(db.projects.add).toHaveBeenCalled();
-    expect(db.logframes.bulkAdd).toHaveBeenCalled();
-    expect(db.indicators.bulkAdd).toHaveBeenCalled();
-    expect(db.surveys.bulkAdd).toHaveBeenCalled();
+    // Los 3 tenants del plan: Wayuu, Maicao y Hocol
+    expect(db.tenants._rows.has('ten-wayuu')).toBe(true);
+    expect(db.tenants._rows.has('ten-maicao')).toBe(true);
+    expect(db.tenants._rows.has('ten-hocol')).toBe(true);
+    expect(db.tenants._rows.size).toBe(3);
   });
 
-  it('NO debería volver a sembrar datos si ya existen proyectos en IndexedDB', async () => {
-    // Simular que ya hay proyectos, el proyecto Wayuu, el de Maicao y el Impacto existen en IndexedDB
-    db.projects.count.mockResolvedValueOnce(2);
-    db.projects.get.mockResolvedValueOnce({ id: 'proj-wayuu-001', name: 'Guardianes del Mar' });
-    db.projects.get.mockResolvedValueOnce({ id: 'proj-maicao-002', name: 'Clinica Maicao' });
-    db.projects.get.mockResolvedValueOnce({ id: 'lf-wayuu-impact', type: 'impact' });
-
+  it('Debería etiquetar cada dato con su tenant_id (aislamiento M0)', async () => {
     await seedLocalData();
 
-    // Comprobar que no se llamó a add ni bulkAdd para no sobreescribir datos locales del usuario
-    expect(db.projects.add).not.toHaveBeenCalled();
-    expect(db.projects.bulkAdd).not.toHaveBeenCalled();
+    const allUnits = [...db.units._rows.values()];
+    expect(allUnits.length).toBeGreaterThan(0);
+    expect(allUnits.every(u => typeof u.tenant_id === 'string' && u.tenant_id.length > 0)).toBe(true);
+
+    // Hocol debe cargar sus 36 comunidades (Anexo E)
+    const hocolUnits = allUnits.filter(u => u.tenant_id === 'ten-hocol');
+    expect(hocolUnits.length).toBe(36);
+  });
+
+  it('Debería cargar el catálogo de indicadores del Anexo E para Hocol (tablas 8.1–8.7)', async () => {
+    await seedLocalData();
+    const hocolIndicators = [...db.indicators._rows.values()].filter(i => i.tenant_id === 'ten-hocol');
+    // 8 estratégicos + 8 L1 + 4 L2 + 4 L3 + 4 L4 + 4 L5 + 12 MEAL = 44
+    expect(hocolIndicators.length).toBe(44);
+    expect(hocolIndicators.some(i => i.code === 'IND-EST-01')).toBe(true);
+  });
+
+  it('NO debería re-sembrar un tenant que ya existe (idempotencia)', async () => {
+    await seedLocalData();
+    const firstCount = db.tenants._rows.size;
+    // Segunda ejecución: no debe duplicar ni recrear
+    await seedLocalData();
+    expect(db.tenants._rows.size).toBe(firstCount);
+  });
+
+  it('Debería firmar los registros sembrados con SHA-256 (integridad)', async () => {
+    await seedLocalData();
+    const tenant = db.tenants._rows.get('ten-wayuu');
+    expect(tenant.signature).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('logAudit debería crear una entrada firmada en la bitácora', async () => {
+    const entry = await logAudit({
+      tenantId: 'ten-wayuu',
+      actorId: 'user-1',
+      accion: 'validar',
+      entidad: 'field_records',
+      entidadId: 'rec-1'
+    });
+    expect(entry.signature).toMatch(/^[0-9a-f]{64}$/);
+    expect(db.audit_log._rows.get(entry.id).accion).toBe('validar');
+  });
+
+  it('calculateRecordHash debería ser determinista e ignorar signature/sync_status', async () => {
+    const a = await calculateRecordHash({ id: '1', name: 'x', sync_status: 'pending_sync' });
+    const b = await calculateRecordHash({ id: '1', name: 'x', signature: 'zzz', sync_status: 'synced' });
+    expect(a).toBe(b);
   });
 });

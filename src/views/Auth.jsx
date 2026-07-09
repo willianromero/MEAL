@@ -109,6 +109,12 @@ export default function Auth({ currentUser, setCurrentUser }) {
       case 'viewer':
         mockEmail = 'externo@meal.org';
         break;
+      case 'gestor':
+        mockEmail = 'gestor@meal.org';
+        break;
+      case 'director':
+        mockEmail = 'director@meal.org';
+        break;
       default:
         mockEmail = 'usuario@meal.org';
     }
@@ -353,13 +359,32 @@ export default function Auth({ currentUser, setCurrentUser }) {
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>campo@meal.org</span>
                   </button>
 
-                  <button 
+                  <button
                     onClick={() => handleQuickLogin('viewer')}
                     className="btn btn-secondary"
                     style={{ justifyContent: 'space-between', borderLeft: '4px solid #0ea5e9', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
                   >
                     <span>Visualizador local</span>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>externo@meal.org</span>
+                  </button>
+
+                  {/* Roles de tenant del DRT para probar la captura y validación */}
+                  <button
+                    onClick={() => handleQuickLogin('gestor')}
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'space-between', borderLeft: '4px solid #14b8a6', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                  >
+                    <span>Gestor de Campo (captura)</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>gestor@meal.org</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleQuickLogin('director')}
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'space-between', borderLeft: '4px solid #a855f7', fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                  >
+                    <span>Director del Proyecto</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>director@meal.org</span>
                   </button>
                 </div>
               </div>

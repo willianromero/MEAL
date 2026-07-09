@@ -1,309 +1,236 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
-import { 
-  Briefcase, 
-  CheckCircle, 
-  ClipboardList, 
-  MessageSquare, 
-  BookOpen, 
-  ArrowRight,
-  TrendingUp
+import { useTenant } from '../context/TenantContext';
+import { computeIndicatorValue, semaforo, progresoPct } from '../lib/indicatorEngine';
+import { exportToCsv } from '../lib/exportCsv';
+import {
+  Briefcase, TrendingUp, ClipboardList, MessageSquare, Download,
+  LayoutDashboard, Layers, MapPin, AlertTriangle, DollarSign, CheckCircle2
 } from 'lucide-react';
 
+const SEM_COLOR = { verde: '#10b981', amarillo: '#eab308', rojo: '#ef4444' };
+
 export default function Dashboard({ setCurrentView }) {
-  // Consultas reactivas a la base de datos local
-  const projects = useLiveQuery(() => db.projects.toArray()) || [];
-  const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
-  const surveyResponses = useLiveQuery(() => db.survey_responses.toArray()) || [];
-  const feedbacks = useLiveQuery(() => db.feedbacks.toArray()) || [];
-  const lessons = useLiveQuery(() => db.lessons_learned.toArray()) || [];
+  const { activeTenantId, activeTenant } = useTenant();
+  const byTenant = (store) => () =>
+    activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
 
-  // Cálculos estadísticos
-  const activeProjectsCount = projects.filter(p => p.status === 'active').length;
-  
-  const pendingFeedbacksCount = feedbacks.filter(f => f.status === 'pending').length;
+  // Se excluyen los elementos de configuración archivados de los consolidados.
+  const projects = (useLiveQuery(byTenant(db.projects), [activeTenantId]) || []).filter(p => !p.archivado);
+  const indicators = (useLiveQuery(byTenant(db.indicators), [activeTenantId]) || []).filter(i => !i.archivado);
+  const lines = (useLiveQuery(byTenant(db.program_lines), [activeTenantId]) || []).filter(l => !l.archivado);
+  const units = (useLiveQuery(byTenant(db.units), [activeTenantId]) || []).filter(u => !u.archivado);
+  const records = useLiveQuery(byTenant(db.field_records), [activeTenantId]) || [];
+  const feedbacks = useLiveQuery(byTenant(db.feedbacks), [activeTenantId]) || [];
 
-  // Porcentaje promedio de avance de los indicadores (calculado como: actual / target * 100)
-  const averageProgress = React.useMemo(() => {
-    if (indicators.length === 0) return 0;
-    const progressList = indicators.map(ind => {
-      if (ind.target === 0) return 0;
-      const pct = (ind.actual / ind.target) * 100;
-      return pct > 100 ? 100 : pct; // Cap al 100%
-    });
-    const sum = progressList.reduce((acc, curr) => acc + curr, 0);
-    return Math.round(sum / indicators.length);
-  }, [indicators]);
+  const [tab, setTab] = useState('ejecutivo');
+  const [filtroLinea, setFiltroLinea] = useState('all');
 
-  // Desglose de géneros simulados a partir de las encuestas registradas (por ejemplo srv-102)
-  const demographicStats = React.useMemo(() => {
-    let female = 24; // Valores semilla iniciales
-    let male = 16;
-    let other = 5;
+  // Calcula valor + semáforo de cada indicador sobre registros validados
+  const indCalc = useMemo(() => indicators.map(ind => {
+    const formula = ind.formula;
+    const valor = formula ? computeIndicatorValue(ind, records) : (ind.actual || 0);
+    return { ...ind, valorCalc: valor, sem: semaforo(valor, ind.target), pct: progresoPct(valor, ind.target) };
+  }), [indicators, records]);
 
-    // Sumar de las encuestas dinámicas guardadas que tengan género
-    surveyResponses.forEach(resp => {
-      const g = resp.data?.gender;
-      if (g === 'Femenino') female += 1;
-      else if (g === 'Masculino') male += 1;
-      else if (g === 'Otro') other += 1;
-    });
+  const indFiltered = filtroLinea === 'all' ? indCalc : indCalc.filter(i => i.linea_id === filtroLinea);
 
-    const total = female + male + other;
-    return {
-      female,
-      male,
-      other,
-      total,
-      femalePct: total > 0 ? Math.round((female / total) * 100) : 0,
-      malePct: total > 0 ? Math.round((male / total) * 100) : 0,
-      otherPct: total > 0 ? Math.round((other / total) * 100) : 0
-    };
-  }, [surveyResponses]);
+  const avanceFisico = indFiltered.length ? Math.round(indFiltered.reduce((a, i) => a + i.pct, 0) / indFiltered.length) : 0;
+  const enRiesgo = indFiltered.filter(i => i.sem === 'rojo').length;
+  const validados = records.filter(r => r.estado_validacion === 'validado').length;
+  const pqrsAbiertas = feedbacks.filter(f => f.estado && f.estado !== 'cerrada' && f.estado !== 'retroalimentada').length;
+
+  const lineName = (id) => lines.find(l => l.id === id)?.nombre || 'Sin línea';
+  const unitName = (id) => units.find(u => u.id === id)?.nombre || '—';
+
+  const TABS = [
+    ['ejecutivo', 'Resumen ejecutivo', <LayoutDashboard size={15} />],
+    ['linea', 'Por línea', <Layers size={15} />],
+    ['comunidad', 'Por unidad', <MapPin size={15} />],
+    ['solicitudes', 'Solicitudes/Apoyos', <ClipboardList size={15} />],
+    ['riesgos', 'Riesgos y PQRS', <AlertTriangle size={15} />],
+    ['financiero', 'Físico vs financiero', <DollarSign size={15} />]
+  ];
+
+  const exportIndicators = () => exportToCsv(`indicadores_${activeTenantId}`,
+    indFiltered.map(i => ({ codigo: i.code, nombre: i.name, linea: lineName(i.linea_id), meta: i.target, valor: i.valorCalc, avance_pct: i.pct, semaforo: i.sem, linea_base: i.linea_base_valor })));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      {/* Cabecera */}
-      <div>
-        <h1>Dashboard General MEAL</h1>
-        <p>Estadísticas agregadas de monitoreo de campo en tiempo real, sincronizadas localmente.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div className="flex-between" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <h1>Tablero de Control MEAL</h1>
+          <p>Proyecto: <strong style={{ color: 'var(--primary-light)' }}>{activeTenant?.nombre || '—'}</strong></p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <select value={filtroLinea} onChange={e => setFiltroLinea(e.target.value)} style={{ padding: '0.45rem 1rem', width: 'auto' }}>
+            <option value="all">Todas las líneas</option>
+            {lines.map(l => <option key={l.id} value={l.id}>{l.codigo} · {l.nombre}</option>)}
+          </select>
+          <button onClick={exportIndicators} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Download size={15} /> Exportar CSV
+          </button>
+        </div>
       </div>
 
-      {/* Grid de Métricas Principales */}
+      {/* KPIs principales */}
       <div className="metrics-grid">
-        {/* Metrica 1 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{ background: 'rgba(5, 150, 105, 0.15)', color: 'var(--primary-light)', padding: '0.75rem', borderRadius: '12px' }}>
-            <Briefcase size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Proyectos Activos</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{activeProjectsCount} / {projects.length}</div>
-          </div>
-        </div>
-
-        {/* Metrica 2 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{ background: 'rgba(13, 148, 136, 0.15)', color: 'var(--secondary-light)', padding: '0.75rem', borderRadius: '12px' }}>
-            <TrendingUp size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Avance de Metas Físicas</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{averageProgress}%</div>
-          </div>
-        </div>
-
-        {/* Metrica 3 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{ background: 'rgba(14, 165, 233, 0.15)', color: '#38bdf8', padding: '0.75rem', borderRadius: '12px' }}>
-            <ClipboardList size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Encuestas Recolectadas</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{surveyResponses.length}</div>
-          </div>
-        </div>
-
-        {/* Metrica 4 */}
-        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', padding: '0.75rem', borderRadius: '12px' }}>
-            <MessageSquare size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Quejas en Espera</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{pendingFeedbacksCount}</div>
-          </div>
-        </div>
+        <Kpi icon={<Briefcase size={22} />} label="Proyectos activos" value={`${projects.filter(p => p.status === 'active').length}/${projects.length}`} color="var(--primary-light)" />
+        <Kpi icon={<TrendingUp size={22} />} label="Avance físico (filtro)" value={`${avanceFisico}%`} color="var(--secondary-light)" />
+        <Kpi icon={<CheckCircle2 size={22} />} label="Registros validados" value={validados} color="#38bdf8" />
+        <Kpi icon={<AlertTriangle size={22} />} label="Indicadores en rojo" value={enRiesgo} color="#fca5a5" />
+        <Kpi icon={<MessageSquare size={22} />} label="PQRS abiertas" value={pqrsAbiertas} color="#fef08a" />
       </div>
 
-      {/* Grid de Gráficos (SVG Premium hechos a mano) */}
-      <div className="dashboard-grid">
-        {/* Gráfico 1: Meta vs. Avance Real */}
-        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <h3>Avance de Indicadores Clave (Meta vs. Logro)</h3>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', justifyContent: 'center' }}>
-            {indicators.slice(0, 4).map(ind => {
-              const pct = ind.target > 0 ? Math.round((ind.actual / ind.target) * 100) : 0;
-              const barPct = pct > 100 ? 100 : pct;
+      {/* Tabs de las 6 vistas mínimas (DRT 10.1) */}
+      <div className="glass-panel" style={{ padding: '0.4rem', display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+        {TABS.map(([id, label, icon]) => (
+          <button key={id} onClick={() => setTab(id)} className="btn"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: tab === id ? 'var(--bg-dark)' : 'transparent', borderColor: tab === id ? 'var(--border-glass)' : 'transparent', color: tab === id ? 'var(--primary-light)' : 'var(--text-secondary)', fontSize: '0.78rem', padding: '0.4rem 0.85rem' }}>
+            {icon} {label}
+          </button>
+        ))}
+      </div>
 
-              return (
-                <div key={ind.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <div className="flex-between" style={{ fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '280px' }} title={ind.name}>
-                      {ind.code}: {ind.name}
-                    </span>
-                    <span style={{ color: 'var(--primary-light)', fontWeight: 'bold' }}>{pct}%</span>
-                  </div>
-                  
-                  {/* Progress visual bar */}
-                  <div className="progress-bar-bg" style={{ height: '10px' }}>
-                    <div className="progress-bar-fill" style={{ width: `${barPct}%` }}></div>
-                  </div>
-                  
-                  <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    <span>Línea Base: {ind.baseline} {ind.unit}</span>
-                    <span>Actual: {ind.actual} / Meta: {ind.target} {ind.unit}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Gráfico 2: Desglose Demográfico de Participantes (Gráfico de Rosca SVG) */}
-        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ width: '100%', textAlign: 'left' }}>Breakdown de Género de los Participantes</h3>
-          
-          <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '1.5rem', justifyContent: 'center', flexWrap: 'wrap', margin: '1rem 0' }}>
-            {/* SVG Donut Chart */}
-            <svg width="150" height="150" viewBox="0 0 42 42" className="donut" style={{ transform: 'rotate(-90deg)' }}>
-              {/* Fondo gris */}
-              <circle className="donut-hole" cx="21" cy="21" r="15.91549430918954" fill="transparent"></circle>
-              <circle className="donut-ring" cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="4.5"></circle>
-
-              {/* Segmento Femenino (Emerald) */}
-              <circle 
-                className="donut-segment" 
-                cx="21" 
-                cy="21" 
-                r="15.91549430918954" 
-                fill="transparent" 
-                stroke="var(--primary-color)" 
-                strokeWidth="4.5" 
-                strokeDasharray={`${demographicStats.femalePct} ${100 - demographicStats.femalePct}`} 
-                strokeDashoffset="0"
-              ></circle>
-
-              {/* Segmento Masculino (Teal) */}
-              <circle 
-                className="donut-segment" 
-                cx="21" 
-                cy="21" 
-                r="15.91549430918954" 
-                fill="transparent" 
-                stroke="var(--secondary-color)" 
-                strokeWidth="4.5" 
-                strokeDasharray={`${demographicStats.malePct} ${100 - demographicStats.malePct}`} 
-                strokeDashoffset={100 - demographicStats.femalePct}
-              ></circle>
-
-              {/* Segmento Otro (Amber) */}
-              <circle 
-                className="donut-segment" 
-                cx="21" 
-                cy="21" 
-                r="15.91549430918954" 
-                fill="transparent" 
-                stroke="#eab308" 
-                strokeWidth="4.5" 
-                strokeDasharray={`${demographicStats.otherPct} ${100 - demographicStats.otherPct}`} 
-                strokeDashoffset={100 - demographicStats.femalePct - demographicStats.malePct}
-              ></circle>
-            </svg>
-
-            {/* Leyenda */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--primary-color)' }}></div>
-                <span>Mujeres: <strong>{demographicStats.female}</strong> ({demographicStats.femalePct}%)</span>
+      {/* RESUMEN EJECUTIVO */}
+      {tab === 'ejecutivo' && (
+        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <h3>Avance de indicadores vs meta y línea base</h3>
+          {indFiltered.length === 0 && <div style={{ color: 'var(--text-muted)' }}>No hay indicadores para el filtro seleccionado.</div>}
+          {indFiltered.map(i => (
+            <div key={i.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <div className="flex-between" style={{ fontSize: '0.85rem' }}>
+                <span style={{ fontWeight: 600, maxWidth: '70%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={i.name}>
+                  <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', marginRight: '0.4rem' }}>{i.code}</span>{i.name}
+                </span>
+                <span style={{ color: SEM_COLOR[i.sem], fontWeight: 'bold' }}>{i.pct}%</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--secondary-color)' }}></div>
-                <span>Hombres: <strong>{demographicStats.male}</strong> ({demographicStats.malePct}%)</span>
+              <div className="progress-bar-bg" style={{ height: '9px' }}>
+                <div className="progress-bar-fill" style={{ width: `${i.pct}%`, background: SEM_COLOR[i.sem] }}></div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#eab308' }}></div>
-                <span>Otro/ND: <strong>{demographicStats.other}</strong> ({demographicStats.otherPct}%)</span>
-              </div>
-              <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '0.4rem', marginTop: '0.2rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Total encuestados: {demographicStats.total}
+              <div className="flex-between" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                <span>Línea base: {i.linea_base_valor ?? '—'} {i.linea_base_congelada ? '🔒' : ''}</span>
+                <span>Valor: {i.valorCalc} / Meta: {i.target ?? '—'} {i.unit}</span>
               </div>
             </div>
-          </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* Actividades Recientes y Accesos Directos */}
-      <div className="dashboard-grid" style={{ gridTemplateColumns: '2fr 1fr' }}>
-        {/* Actividades Recientes */}
-        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <h3>Últimos Registros Guardados en Campo</h3>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {surveyResponses.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                No se han registrado respuestas de encuestas en IndexedDB todavía.
+      {/* POR LÍNEA */}
+      {tab === 'linea' && (
+        <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+          {lines.map(l => {
+            const lis = indCalc.filter(i => i.linea_id === l.id);
+            const avance = lis.length ? Math.round(lis.reduce((a, i) => a + i.pct, 0) / lis.length) : 0;
+            const rojo = lis.filter(i => i.sem === 'rojo').length;
+            return (
+              <div key={l.id} className="glass-card" style={{ padding: '1.25rem' }}>
+                <div className="flex-between"><strong>{l.codigo}</strong><span className="badge" style={{ fontSize: '0.62rem' }}>{l.tipo}</span></div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0.35rem 0' }}>{l.nombre}</div>
+                <div className="progress-bar-bg" style={{ height: '8px' }}><div className="progress-bar-fill" style={{ width: `${avance}%` }}></div></div>
+                <div className="flex-between" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                  <span>{lis.length} indicadores</span><span>{avance}% avance{rojo ? ` · ${rojo} en rojo` : ''}</span>
+                </div>
               </div>
-            ) : (
-              surveyResponses.slice(-3).reverse().map(resp => {
-                const isSynced = resp.sync_status === 'synced';
+            );
+          })}
+        </div>
+      )}
+
+      {/* POR UNIDAD */}
+      {tab === 'comunidad' && (
+        <div className="glass-panel" style={{ padding: '1.5rem', overflowX: 'auto' }}>
+          <table className="table" style={{ width: '100%', minWidth: '480px' }}>
+            <thead><tr><th>Unidad</th><th>Municipio</th><th>Registros validados</th><th>Pendientes</th></tr></thead>
+            <tbody>
+              {units.map(u => {
+                const rs = records.filter(r => r.unidad_id === u.id);
                 return (
-                  <div key={resp.id} className="flex-between" style={{ padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>
-                        Encuesta: {resp.survey_id === 'srv-101' ? 'Agua y Saneamiento' : 'Capacitación Huertos'}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        Ingresado por: {resp.submitted_by} • {new Date(resp.submitted_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <div>
-                      <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
-                        {isSynced ? 'Sincronizado' : 'Pendiente'}
-                      </span>
-                    </div>
-                  </div>
+                  <tr key={u.id}>
+                    <td style={{ fontWeight: 600 }}>{u.nombre}</td>
+                    <td style={{ textTransform: 'capitalize' }}>{u.municipio || '—'}</td>
+                    <td>{rs.filter(r => r.estado_validacion === 'validado').length}</td>
+                    <td>{rs.filter(r => r.estado_validacion === 'pendiente').length}</td>
+                  </tr>
                 );
-              })
-            )}
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* SOLICITUDES / APOYOS (L2–L5) */}
+      {tab === 'solicitudes' && (
+        <div className="glass-panel" style={{ padding: '1.5rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Registros por formulario (volumen y estado)</h3>
+          <RecordsByForm records={records} />
+        </div>
+      )}
+
+      {/* RIESGOS Y PQRS */}
+      {tab === 'riesgos' && (
+        <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          {['rojo', 'naranja', 'amarillo', 'verde'].map(nivel => {
+            const items = feedbacks.filter(f => f.nivel === nivel);
+            const color = { rojo: '#ef4444', naranja: '#f97316', amarillo: '#eab308', verde: '#10b981' }[nivel];
+            return (
+              <div key={nivel} className="glass-card" style={{ padding: '1.25rem', borderLeft: `4px solid ${color}` }}>
+                <div style={{ textTransform: 'capitalize', fontWeight: 700, color }}>{nivel}</div>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{items.length}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>PQRS nivel {nivel}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* FÍSICO VS FINANCIERO */}
+      {tab === 'financiero' && (
+        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="flex-between">
+            <div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Avance físico global</div><div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary-light)' }}>{avanceFisico}%</div></div>
+            <div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Avance financiero</div><div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-muted)' }}>—</div></div>
+          </div>
+          <div className="badge badge-info" style={{ width: 'fit-content', fontSize: '0.72rem' }}>
+            El avance financiero lo alimenta el Profesional Administrativo y Financiero (módulo financiero, Fase futura).
           </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        {/* Accesos Rápidos */}
-        <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <h3>Flujos de Trabajo</h3>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <button 
-              onClick={() => setCurrentView('surveys')} 
-              className="btn btn-secondary" 
-              style={{ justifyContent: 'space-between', padding: '0.85rem 1.25rem' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><ClipboardList size={16} /> Llenar Encuesta</span>
-              <ArrowRight size={14} />
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('indicators')} 
-              className="btn btn-secondary" 
-              style={{ justifyContent: 'space-between', padding: '0.85rem 1.25rem' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={16} /> Actualizar Metas</span>
-              <ArrowRight size={14} />
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('feedback')} 
-              className="btn btn-secondary" 
-              style={{ justifyContent: 'space-between', padding: '0.85rem 1.25rem' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><MessageSquare size={16} /> Buzón de Quejas</span>
-              <ArrowRight size={14} />
-            </button>
-
-            <button 
-              onClick={() => setCurrentView('lessons')} 
-              className="btn btn-secondary" 
-              style={{ justifyContent: 'space-between', padding: '0.85rem 1.25rem' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BookOpen size={16} /> Lecciones</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-        </div>
+function Kpi({ icon, label, value, color }) {
+  return (
+    <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.1rem 1.25rem' }}>
+      <div style={{ background: 'rgba(255,255,255,0.05)', color, padding: '0.65rem', borderRadius: '12px' }}>{icon}</div>
+      <div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{label}</div>
+        <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{value}</div>
       </div>
     </div>
+  );
+}
+
+function RecordsByForm({ records }) {
+  const byForm = records.reduce((acc, r) => {
+    const k = r.formulario_id;
+    acc[k] = acc[k] || { total: 0, validado: 0, pendiente: 0, rechazado: 0 };
+    acc[k].total += 1; acc[k][r.estado_validacion] = (acc[k][r.estado_validacion] || 0) + 1;
+    return acc;
+  }, {});
+  const rows = Object.entries(byForm);
+  if (rows.length === 0) return <div style={{ color: 'var(--text-muted)' }}>Sin registros capturados aún.</div>;
+  return (
+    <table className="table" style={{ width: '100%' }}>
+      <thead><tr><th>Formulario</th><th>Total</th><th>Validados</th><th>Pendientes</th><th>Rechazados</th></tr></thead>
+      <tbody>
+        {rows.map(([id, s]) => (
+          <tr key={id}><td>{id}</td><td>{s.total}</td><td>{s.validado || 0}</td><td>{s.pendiente || 0}</td><td>{s.rechazado || 0}</td></tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

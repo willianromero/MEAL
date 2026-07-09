@@ -3,15 +3,19 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, addWithSignature, putWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
 import SignatureVerifier from '../components/SignatureVerifier';
+import { useTenant } from '../context/TenantContext';
+import { CAP, can } from '../lib/roles';
 import { BookOpen, AlertTriangle, Lightbulb, Plus, Send, Info, Eye, ClipboardCheck, Calendar, User, CheckCircle2 } from 'lucide-react';
 
 export default function Lessons({ currentUser }) {
-  const isViewer = currentUser?.role === 'viewer';
-  const isAdmin = currentUser?.role === 'admin';
+  const { activeTenantId, capabilities } = useTenant();
+  const isViewer = !can(capabilities, CAP.EDIT_CATALOG); // financiador/auditor: solo lectura
 
-  // Cargar datos reactivos locales
-  const projects = useLiveQuery(() => db.projects.toArray()) || [];
-  const lessons = useLiveQuery(() => db.lessons_learned.toArray()) || [];
+  // Datos reactivos locales SCOPEADOS al tenant activo (aislamiento M0)
+  const byTenant = (store) => () =>
+    activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
+  const projects = useLiveQuery(byTenant(db.projects), [activeTenantId]) || [];
+  const lessons = useLiveQuery(byTenant(db.lessons_learned), [activeTenantId]) || [];
 
   // Vista activa: 'list' o 'create'
   const [tab, setTab] = useState('list');
@@ -46,6 +50,7 @@ export default function Lessons({ currentUser }) {
 
     const newLesson = {
       id: newId,
+      tenant_id: activeTenantId,
       project_id: projectId,
       title,
       description,

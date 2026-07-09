@@ -1,17 +1,68 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, addWithSignature } from '../db';
+import { db, addWithSignature, putWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye, Plus } from 'lucide-react';
+import { useTenant } from '../context/TenantContext';
+import { CAP, can } from '../lib/roles';
+import { logAudit } from '../db';
+import { archiveRecord, restoreRecord, hardDelete, isArchived } from '../lib/configActions';
+import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye, Plus, Lock, Snowflake, Archive, RotateCcw, Trash2, FilePen } from 'lucide-react';
 
 export default function Indicators({ currentUser }) {
-  const isViewer = currentUser?.role === 'viewer';
-  const isAdmin = currentUser?.role === 'admin';
+  const { activeTenantId, capabilities } = useTenant();
+  const isAdmin = can(capabilities, CAP.EDIT_CATALOG); // define y edita indicadores
+  const canFreeze = can(capabilities, CAP.VALIDATE) || can(capabilities, CAP.APPROVE); // congela línea base
+  const canDelete = can(capabilities, CAP.DELETE_CONFIG); // borrado definitivo (solo admin)
+  const isViewer = !isAdmin;                             // consulta sin editar
+  const ctx = { tenantId: activeTenantId, userId: currentUser?.id, userEmail: currentUser?.email };
 
-  // Cargar datos reactivos locales
-  const projects = useLiveQuery(() => db.projects.toArray()) || [];
-  const logframes = useLiveQuery(() => db.logframes.toArray()) || [];
-  const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionMsg, setActionMsg] = useState('');
+  // Edición de la DEFINICIÓN del indicador (nombre, unidad, meta, etc.)
+  const [editDefId, setEditDefId] = useState(null);
+  const [def, setDef] = useState({ name: '', unit: '', target: 0, frecuencia: 'mensual', medio_verificacion: '' });
+
+  const startEditDef = (ind) => {
+    setEditDefId(ind.id);
+    setDef({ name: ind.name || '', unit: ind.unit || '', target: ind.target ?? 0, frecuencia: ind.frecuencia || 'mensual', medio_verificacion: ind.medio_verificacion || '' });
+  };
+  const saveDef = async (ind) => {
+    await putWithSignature(db.indicators, {
+      ...ind, name: def.name, unit: def.unit, target: Number(def.target) || 0,
+      frecuencia: def.frecuencia, medio_verificacion: def.medio_verificacion,
+      updated_at: new Date().toISOString(), sync_status: 'pending_sync'
+    });
+    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'indicators', entidadId: ind.id, despues: { name: def.name, target: def.target } });
+    await updatePendingCount();
+    setEditDefId(null);
+  };
+  const doArchive = async (ind) => { await archiveRecord('indicators', db.indicators, ind, ctx); };
+  const doRestore = async (ind) => { await restoreRecord('indicators', db.indicators, ind, ctx); };
+  const doDelete = async (ind) => {
+    if (!confirm(`¿Eliminar definitivamente el indicador "${ind.code}"? Esta acción no se puede deshacer.`)) return;
+    try { await hardDelete('indicators', db.indicators, ind, ctx); setActionMsg(`Indicador ${ind.code} eliminado.`); }
+    catch (e) { setActionMsg(e.message); }
+  };
+
+  // Congelar línea base al valor actual (HU-05, RF-IND-4). Queda en bitácora.
+  const freezeBaseline = async (ind) => {
+    if (!canFreeze || ind.linea_base_congelada) return;
+    await putWithSignature(db.indicators, {
+      ...ind,
+      linea_base_valor: ind.actual ?? ind.linea_base_valor ?? 0,
+      linea_base_congelada: true,
+      updated_at: new Date().toISOString(),
+      sync_status: 'pending_sync'
+    });
+    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'congelar_linea_base', entidad: 'indicators', entidadId: ind.id, despues: { linea_base_valor: ind.actual } });
+  };
+
+  // Datos reactivos locales SCOPEADOS al tenant activo (aislamiento M0)
+  const byTenant = (store) => () =>
+    activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
+  const projects = useLiveQuery(byTenant(db.projects), [activeTenantId]) || [];
+  const logframes = useLiveQuery(byTenant(db.logframes), [activeTenantId]) || [];
+  const indicators = useLiveQuery(byTenant(db.indicators), [activeTenantId]) || [];
 
   // Filtros
   const [selectedProjectId, setSelectedProjectId] = useState('all');
@@ -50,9 +101,9 @@ export default function Indicators({ currentUser }) {
   const [newIndTarget, setNewIndTarget] = useState(10);
   const [newIndError, setNewIndError] = useState('');
 
-  const filteredIndicators = selectedProjectId === 'all'
-    ? indicators
-    : indicators.filter(ind => ind.project_id === selectedProjectId);
+  const filteredIndicators = indicators
+    .filter(ind => selectedProjectId === 'all' || ind.project_id === selectedProjectId)
+    .filter(ind => showArchived ? isArchived('indicators', ind) : !isArchived('indicators', ind));
 
   // Filtrar componentes del marco lógico según el proyecto del nuevo indicador
   const filteredLogframesForNewInd = newIndProjectId
@@ -126,17 +177,8 @@ export default function Indicators({ currentUser }) {
     try {
       const currentRecord = await db.indicators.get(indId);
       if (currentRecord) {
-        const merged = { ...currentRecord, ...updatedData };
-        // Guardar actualizando firma (Pilar 3)
-        await db.indicators.put(merged);
-        // Actualizar firma del registro en IndexedDB
-        const keys = Object.keys(merged).sort();
-        const sorted = {};
-        keys.forEach(k => { if (k !== 'signature' && k !== 'sync_status') sorted[k] = merged[k]; });
-        const hash = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(sorted)));
-        const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-        
-        await db.indicators.update(indId, { ...updatedData, signature: hashHex });
+        // Guardar recalculando la firma SHA-256 sobre el registro completo (Pilar 3)
+        await putWithSignature(db.indicators, { ...currentRecord, ...updatedData });
         setEditingId(null);
         await updatePendingCount();
       }
@@ -161,6 +203,7 @@ export default function Indicators({ currentUser }) {
 
     const newIndicator = {
       id: newId,
+      tenant_id: activeTenantId,
       project_id: newIndProjectId,
       logframe_id: newIndLogframeId,
       code: newIndCode,
@@ -169,13 +212,17 @@ export default function Indicators({ currentUser }) {
       baseline: Number(newIndBaseline) || 0,
       target: Number(newIndTarget) || 0,
       actual: 0,
+      meta_tipo: 'numero',
+      linea_base_valor: Number(newIndBaseline) || 0,
+      linea_base_congelada: false,
       disaggregated_data: {
         gender: { male: 0, female: 0, other: 0 },
         age: { children: 0, youth: 0, adult: 0, elder: 0 },
         ethnicity: { indigenous: 0, afrodescendant: 0, local: 0 },
         location: { Mayapo: 0, ElPajaro: 0 }
       },
-      updated_at: now
+      updated_at: now,
+      sync_status: 'pending_sync'
     };
 
     try {
@@ -345,12 +392,24 @@ export default function Indicators({ currentUser }) {
           </select>
         </div>
 
-        {isViewer && (
-          <div className="badge badge-info" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <Info size={14} /> Modo Lectura: No puedes editar valores logrados.
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {isAdmin && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+              <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} style={{ width: 'auto' }} />
+              <Archive size={14} /> Ver archivados
+            </label>
+          )}
+          {isViewer && (
+            <div className="badge badge-info" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Info size={14} /> Modo Lectura: No puedes editar valores logrados.
+            </div>
+          )}
+        </div>
       </div>
+
+      {actionMsg && (
+        <div className="badge badge-info" style={{ display: 'block', padding: '0.6rem 1rem', fontSize: '0.8rem', whiteSpace: 'normal', width: 'fit-content' }}>{actionMsg}</div>
+      )}
 
       {/* Lista de Indicadores */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -418,6 +477,51 @@ export default function Indicators({ currentUser }) {
                   </div>
                 )}
 
+                {/* Barra de acciones de configuración (editar / archivar / eliminar) */}
+                {isAdmin && (
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {isArchived('indicators', ind) && <span className="badge" style={{ fontSize: '0.62rem', background: 'rgba(148,163,184,0.15)', color: '#cbd5e1' }}>Archivado</span>}
+                    {!isArchived('indicators', ind) && (
+                      <button onClick={() => (editDefId === ind.id ? setEditDefId(null) : startEditDef(ind))} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <FilePen size={12} /> Editar definición
+                      </button>
+                    )}
+                    {isArchived('indicators', ind) ? (
+                      <button onClick={() => doRestore(ind)} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <RotateCcw size={12} /> Restaurar
+                      </button>
+                    ) : (
+                      <button onClick={() => doArchive(ind)} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <Archive size={12} /> Archivar
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button onClick={() => doDelete(ind)} className="btn btn-danger" style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }} title="Borrado definitivo (requiere conexión)">
+                        <Trash2 size={12} /> Eliminar
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Formulario de edición de la definición */}
+                {editDefId === ind.id && (
+                  <div className="glass-card" style={{ background: 'rgba(15,23,42,0.4)', padding: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', border: '1px dashed var(--border-glass)' }}>
+                    <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}><label>Nombre del indicador</label><input value={def.name} onChange={e => setDef({ ...def, name: e.target.value })} /></div>
+                    <div className="form-group" style={{ marginBottom: 0 }}><label>Unidad</label><input value={def.unit} onChange={e => setDef({ ...def, unit: e.target.value })} /></div>
+                    <div className="form-group" style={{ marginBottom: 0 }}><label>Meta</label><input type="number" value={def.target} onChange={e => setDef({ ...def, target: e.target.value })} /></div>
+                    <div className="form-group" style={{ marginBottom: 0 }}><label>Frecuencia</label>
+                      <select value={def.frecuencia} onChange={e => setDef({ ...def, frecuencia: e.target.value })}>
+                        {['mensual', 'trimestral', 'semestral', 'final', 'continua'].map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}><label>Medio de verificación</label><input value={def.medio_verificacion} onChange={e => setDef({ ...def, medio_verificacion: e.target.value })} /></div>
+                    <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                      <button onClick={() => setEditDefId(null)} className="btn btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.72rem' }}>Cancelar</button>
+                      <button onClick={() => saveDef(ind)} className="btn btn-primary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.72rem' }}><Save size={12} /> Guardar cambios</button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Cabecera del Indicador */}
                 <div className="flex-between" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxWidth: '75%' }}>
@@ -431,6 +535,15 @@ export default function Indicators({ currentUser }) {
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {ind.linea_base_congelada ? (
+                      <span className="badge" style={{ fontSize: '0.62rem', background: 'rgba(14,165,233,0.12)', color: '#7dd3fc', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <Lock size={11} /> Línea base congelada
+                      </span>
+                    ) : canFreeze ? (
+                      <button onClick={() => freezeBaseline(ind)} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }} title="Congelar la línea base al valor actual (queda en bitácora)">
+                        <Snowflake size={11} /> Congelar L. base
+                      </button>
+                    ) : null}
                     <span className={`badge ${isSynced ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
                       {isSynced ? 'Sincronizado' : 'Pendiente Sincro'}
                     </span>

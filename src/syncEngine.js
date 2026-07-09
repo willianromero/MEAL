@@ -1,6 +1,30 @@
 import { db, calculateRecordHash } from './db';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
+// Tablas sincronizables con el backend, en orden de dependencia (FKs).
+// Toda tabla lleva tenant_id (RF-TEN-2) y sync_status indexado.
+export const SYNC_TABLES = [
+  { name: 'profiles', store: () => db.profiles },
+  { name: 'tenants', store: () => db.tenants },
+  { name: 'memberships', store: () => db.memberships },
+  { name: 'units', store: () => db.units },
+  { name: 'program_lines', store: () => db.program_lines },
+  { name: 'projects', store: () => db.projects },
+  { name: 'logframes', store: () => db.logframes },
+  { name: 'forms', store: () => db.forms },
+  { name: 'indicators', store: () => db.indicators },
+  { name: 'indicator_values', store: () => db.indicator_values },
+  { name: 'beneficiaries', store: () => db.beneficiaries },
+  { name: 'consents', store: () => db.consents },
+  { name: 'field_records', store: () => db.field_records },
+  { name: 'evidences', store: () => db.evidences },
+  { name: 'surveys', store: () => db.surveys },
+  { name: 'survey_responses', store: () => db.survey_responses },
+  { name: 'feedbacks', store: () => db.feedbacks },
+  { name: 'lessons_learned', store: () => db.lessons_learned },
+  { name: 'audit_log', store: () => db.audit_log }
+];
+
 // Estado global en memoria
 let syncState = {
   isOnline: navigator.onLine,
@@ -25,14 +49,12 @@ export function subscribeToSyncState(cb) {
 
 export async function updatePendingCount() {
   try {
-    const pendingResponses = await db.survey_responses.where('sync_status').equals('pending_sync').count();
-    const pendingFeedbacks = await db.feedbacks.where('sync_status').equals('pending_sync').count();
-    const pendingLessons = await db.lessons_learned.where('sync_status').equals('pending_sync').count();
-    const pendingIndicators = await db.indicators.filter(ind => ind.sync_status === 'pending_sync').count();
-    const pendingProfiles = await db.profiles.filter(p => p.sync_status === 'pending_sync').count();
+    let total = 0;
+    for (const { store } of SYNC_TABLES) {
+      total += await store().where('sync_status').anyOf(['pending_sync', 'error']).count();
+    }
+    syncState.pendingCount = total;
 
-    syncState.pendingCount = pendingResponses + pendingFeedbacks + pendingLessons + pendingIndicators + pendingProfiles;
-    
     const meta = await db.sync_meta.get('last_synced_at');
     if (meta && meta.value !== '1970-01-01T00:00:00.000Z') {
       syncState.lastSyncedAt = new Date(meta.value).toLocaleString();
@@ -149,77 +171,76 @@ export async function triggerSync() {
   }
 }
 
+// Reintento con backoff exponencial para operaciones de red transitorias (RF-OFF-2).
+async function withBackoff(fn, { retries = 3, baseMs = 500 } = {}) {
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { error } = await fn();
+    if (!error) return;
+    attempt += 1;
+    if (attempt > retries) throw new Error(error.message || 'Error de red tras reintentos');
+    const delay = baseMs * Math.pow(2, attempt - 1); // 500ms, 1s, 2s...
+    console.warn(`[Sync Engine] Reintento ${attempt}/${retries} en ${delay}ms: ${error.message || error}`);
+    await new Promise(res => setTimeout(res, delay));
+  }
+}
+
+// Campos locales que no viajan como columnas al backend (se manejan aparte).
+const LOCAL_ONLY_FIELDS = { evidences: ['blob'] };
+
 // --- SUBIR CAMBIOS LOCALES (PUSH) ---
+// Recorre las tablas en orden de dependencia y sube los registros pendientes,
+// por lotes idempotentes (UUID) y con reintentos por registro. Marca estado
+// 'error' en el registro si agota reintentos, sin abortar toda la sincronización.
 async function pushLocalChanges() {
-  // 1. Respuestas de Encuestas
-  const pendingResponses = await db.survey_responses.where('sync_status').equals('pending_sync').toArray();
-  for (const resp of pendingResponses) {
-    const cleanRecord = { ...resp };
-    delete cleanRecord.sync_status;
-    const { error } = await supabase.from('survey_responses').upsert(cleanRecord);
-    if (!error) {
-      await db.survey_responses.update(resp.id, { sync_status: 'synced' });
-    } else {
-      throw new Error(`Fallo push encuestas: ${error.message}`);
-    }
-  }
-
-  // 2. Quejas y Sugerencias (Feedback)
-  const pendingFeedbacks = await db.feedbacks.where('sync_status').equals('pending_sync').toArray();
-  for (const fb of pendingFeedbacks) {
-    const cleanRecord = { ...fb };
-    delete cleanRecord.sync_status;
-    const { error } = await supabase.from('feedbacks').upsert(cleanRecord);
-    if (!error) {
-      await db.feedbacks.update(fb.id, { sync_status: 'synced' });
-    } else {
-      throw new Error(`Fallo push quejas: ${error.message}`);
-    }
-  }
-
-  // 3. Lecciones Aprendidas
-  const pendingLessons = await db.lessons_learned.where('sync_status').equals('pending_sync').toArray();
-  for (const lesson of pendingLessons) {
-    const cleanRecord = { ...lesson };
-    delete cleanRecord.sync_status;
-    const { error } = await supabase.from('lessons_learned').upsert(cleanRecord);
-    if (!error) {
-      await db.lessons_learned.update(lesson.id, { sync_status: 'synced' });
-    } else {
-      throw new Error(`Fallo push lecciones: ${error.message}`);
-    }
-  }
-
-  // 4. Indicadores
-  const pendingIndicators = await db.indicators.filter(ind => ind.sync_status === 'pending_sync').toArray();
-  for (const ind of pendingIndicators) {
-    const cleanRecord = { ...ind };
-    delete cleanRecord.sync_status;
-    const { error } = await supabase.from('indicators').upsert(cleanRecord);
-    if (!error) {
-      await db.indicators.update(ind.id, { sync_status: 'synced' });
-    } else {
-      throw new Error(`Fallo push indicadores: ${error.message}`);
-    }
-  }
-
-  // 5. Perfiles (profiles)
-  const pendingProfiles = await db.profiles.filter(p => p.sync_status === 'pending_sync').toArray();
-  for (const prof of pendingProfiles) {
-    const cleanRecord = { ...prof };
-    delete cleanRecord.sync_status;
-    const { error } = await supabase.from('profiles').upsert(cleanRecord);
-    if (!error) {
-      await db.profiles.update(prof.id, { sync_status: 'synced' });
-    } else {
-      throw new Error(`Fallo push perfiles: ${error.message}`);
+  for (const { name, store } of SYNC_TABLES) {
+    // Reintenta también los que quedaron en 'error' en ciclos previos
+    const pending = await store().where('sync_status').anyOf(['pending_sync', 'error']).toArray();
+    const stripFields = LOCAL_ONLY_FIELDS[name] || [];
+    for (const record of pending) {
+      const cleanRecord = { ...record };
+      delete cleanRecord.sync_status;
+      stripFields.forEach(f => delete cleanRecord[f]);
+      try {
+        await withBackoff(() => supabase.from(name).upsert(cleanRecord));
+        // Las evidencias suben su binario al almacén de objetos por separado (8.3)
+        if (name === 'evidences' && record.blob) {
+          await uploadEvidenceBlob(record);
+        }
+        await store().update(record.id, { sync_status: 'synced' });
+      } catch (err) {
+        console.error(`[Sync Engine] Registro ${name}/${record.id} marcado con error:`, err.message);
+        await store().update(record.id, { sync_status: 'error' });
+      }
     }
   }
 }
 
-// --- RESOLUCIÓN MATEMÁTICA LAST WRITE WINS (LWW) ---
-export function shouldRemoteOverwriteLocal(localRecord, remoteRecord) {
+// Subida diferida del binario de una evidencia al bucket segregado por tenant.
+async function uploadEvidenceBlob(evidence) {
+  if (!isSupabaseConfigured || !supabase.storage) return; // en modo mock no hay almacén
+  const path = `${evidence.tenant_id}/${evidence.registro_id}/${evidence.id}.jpg`;
+  const { error } = await supabase.storage.from('evidencias').upload(path, evidence.blob, {
+    contentType: evidence.mime || 'image/jpeg', upsert: true
+  });
+  if (error) throw new Error(`Fallo subida de evidencia: ${error.message}`);
+  await db.evidences.update(evidence.id, { url_objeto: path });
+}
+
+// --- RESOLUCIÓN DE CONFLICTOS (DRT 8.4) ---
+// Registros de campo y evidencias son INMUTABLES tras sincronizar: una vez que
+// existen localmente, el servidor no los sobreescribe (una corrección es un
+// registro nuevo). El resto de catálogos usa Last-Write-Wins por updated_at.
+const IMMUTABLE_TABLES = new Set(['field_records', 'evidences', 'audit_log']);
+
+export function shouldRemoteOverwriteLocal(localRecord, remoteRecord, tableName) {
   if (!localRecord) return true;
+  if (tableName && IMMUTABLE_TABLES.has(tableName)) {
+    // Inmutable: solo se acepta si el local aún no llegó al servidor y el
+    // remoto es idéntico (idempotencia); nunca se pisa contenido ya validado.
+    return false;
+  }
   const isLocalPending = localRecord.sync_status === 'pending_sync';
   const localUpdatedAt = new Date(localRecord.updated_at).getTime();
   const remoteUpdatedAt = new Date(remoteRecord.updated_at).getTime();
@@ -228,18 +249,8 @@ export function shouldRemoteOverwriteLocal(localRecord, remoteRecord) {
 
 // --- DESCARGAR CAMBIOS REMOTOS (PULL) ---
 async function pullRemoteChanges(lastSyncedStr) {
-  const tablesToPull = [
-    { name: 'profiles', store: db.profiles },
-    { name: 'projects', store: db.projects },
-    { name: 'logframes', store: db.logframes },
-    { name: 'indicators', store: db.indicators },
-    { name: 'surveys', store: db.surveys },
-    { name: 'survey_responses', store: db.survey_responses },
-    { name: 'feedbacks', store: db.feedbacks },
-    { name: 'lessons_learned', store: db.lessons_learned }
-  ];
-
-  for (const { name, store } of tablesToPull) {
+  for (const { name, store } of SYNC_TABLES) {
+    const table = store();
     const { data, error } = await supabase
       .from(name)
       .select('*')
@@ -251,16 +262,12 @@ async function pullRemoteChanges(lastSyncedStr) {
 
     if (data && data.length > 0) {
       for (const remoteRecord of data) {
-        const localRecord = await store.get(remoteRecord.id);
-        
-        if (shouldRemoteOverwriteLocal(localRecord, remoteRecord)) {
-          const toUpdate = { ...remoteRecord };
-          if ('sync_status' in store.schema.instance) {
-            toUpdate.sync_status = 'synced';
-          }
-          await store.put(toUpdate);
+        const localRecord = await table.get(remoteRecord.id);
+
+        if (shouldRemoteOverwriteLocal(localRecord, remoteRecord, name)) {
+          await table.put({ ...remoteRecord, sync_status: 'synced' });
         } else {
-          console.log(`[LWW Concurrency] Se descarta cambio remoto en "${name}" id ${remoteRecord.id} por ser más antiguo que el cambio offline local.`);
+          console.log(`[Sync Conflicto] Se conserva versión local de "${name}" id ${remoteRecord.id} (offline pendiente o registro inmutable).`);
         }
       }
     }
@@ -397,15 +404,12 @@ export const p2pSyncManager = {
     }
 
     this.log('Recopilando cola local para transmisión...');
-    
-    // Obtener los datos locales de Dexie que requieran sincronización
-    const payload = {
-      survey_responses: await db.survey_responses.where('sync_status').equals('pending_sync').toArray(),
-      feedbacks: await db.feedbacks.where('sync_status').equals('pending_sync').toArray(),
-      lessons_learned: await db.lessons_learned.where('sync_status').equals('pending_sync').toArray(),
-      indicators: await db.indicators.filter(ind => ind.sync_status === 'pending_sync').toArray(),
-      profiles: await db.profiles.filter(p => p.sync_status === 'pending_sync').toArray()
-    };
+
+    // Obtener de cada tabla los registros pendientes de sincronización
+    const payload = {};
+    for (const { name, store } of SYNC_TABLES) {
+      payload[name] = await store().where('sync_status').equals('pending_sync').toArray();
+    }
 
     this.dataChannel.send(JSON.stringify(payload));
     this.log('Cola local transmitida exitosamente al dispositivo par.');
@@ -425,23 +429,16 @@ export const p2pSyncManager = {
   }
 };
 
-// Fusionar los datos recibidos mediante WebRTC P2P (LWW)
+// Fusionar los datos recibidos mediante WebRTC P2P, validando firma y conflicto
 async function mergeP2PPayload(payload) {
-  const tables = [
-    { name: 'profiles', store: db.profiles },
-    { name: 'indicators', store: db.indicators },
-    { name: 'survey_responses', store: db.survey_responses },
-    { name: 'feedbacks', store: db.feedbacks },
-    { name: 'lessons_learned', store: db.lessons_learned }
-  ];
-
-  for (const { name, store } of tables) {
+  for (const { name, store } of SYNC_TABLES) {
+    const table = store();
     const remoteRecords = payload[name] || [];
     for (const remoteRecord of remoteRecords) {
-      const localRecord = await store.get(remoteRecord.id);
+      const localRecord = await table.get(remoteRecord.id);
 
-      // Criterio de validación de firma criptográfica local antes de fusionar
-      // (Si el registro tiene una firma, recalculamos y comparamos para asegurar validez)
+      // Validación de firma criptográfica antes de fusionar: se recalcula el
+      // hash y se descarta cualquier registro corrompido (integridad, 8.6).
       if (remoteRecord.signature) {
         const calculatedSignature = await calculateRecordHash(remoteRecord);
         if (calculatedSignature !== remoteRecord.signature) {
@@ -450,11 +447,9 @@ async function mergeP2PPayload(payload) {
         }
       }
 
-      if (shouldRemoteOverwriteLocal(localRecord, remoteRecord)) {
-        const toSave = { ...remoteRecord };
-        // Asegurar que el registro consolidado mantenga el estado de sincronización pendiente
-        toSave.sync_status = 'pending_sync';
-        await store.put(toSave);
+      if (shouldRemoteOverwriteLocal(localRecord, remoteRecord, name)) {
+        // El registro fusionado queda pendiente para propagarse al backend
+        await table.put({ ...remoteRecord, sync_status: 'pending_sync' });
       }
     }
   }
