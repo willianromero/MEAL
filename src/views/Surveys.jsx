@@ -4,6 +4,8 @@ import { db, addWithSignature } from '../db';
 import { updatePendingCount } from '../syncEngine';
 import { evaluateRule } from '../lib/rulesEngine';
 import SignatureVerifier from '../components/SignatureVerifier';
+import { useTenant } from '../context/TenantContext';
+import { CAP, can } from '../lib/roles';
 import { ClipboardList, Plus, FileText, Send, MapPin, Check, Info, Trash2, ShieldAlert, Award, Eye } from 'lucide-react';
 
 // Regla determinista JSON para evaluar Carencia Productiva Crítica (Pilar 2)
@@ -16,12 +18,15 @@ const CRITICAL_POVERTY_RULE = {
 };
 
 export default function Surveys({ currentUser }) {
-  const isAdmin = currentUser?.role === 'admin';
+  const { activeTenantId, capabilities } = useTenant();
+  const isAdmin = can(capabilities, CAP.EDIT_CATALOG); // diseña plantillas
 
-  // Cargar datos reactivos locales
-  const surveys = useLiveQuery(() => db.surveys.toArray()) || [];
-  const responses = useLiveQuery(() => db.survey_responses.toArray()) || [];
-  const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
+  // Datos reactivos locales SCOPEADOS al tenant activo (aislamiento M0)
+  const byTenant = (store) => () =>
+    activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
+  const surveys = useLiveQuery(byTenant(db.surveys), [activeTenantId]) || [];
+  const responses = useLiveQuery(byTenant(db.survey_responses), [activeTenantId]) || [];
+  const indicators = useLiveQuery(byTenant(db.indicators), [activeTenantId]) || [];
 
   // Vista activa: 'collect' o 'design'
   const [tab, setTab] = useState('collect');
@@ -84,12 +89,14 @@ export default function Surveys({ currentUser }) {
 
     const newSurvey = {
       id: newId,
+      tenant_id: activeTenantId,
       title: surveyTitle,
       description: surveyDesc,
       indicator_id: selectedIndicatorId,
       schema: { fields: processedFields },
       created_by: currentUser.email,
-      updated_at: now
+      updated_at: now,
+      sync_status: 'pending_sync'
     };
 
     try {
@@ -160,6 +167,7 @@ export default function Surveys({ currentUser }) {
 
     const newResponse = {
       id: responseId,
+      tenant_id: activeTenantId,
       survey_id: selectedSurveyId,
       submitted_by: currentUser.email,
       submitted_at: now,

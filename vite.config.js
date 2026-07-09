@@ -10,9 +10,11 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons.svg', 'robots.txt'],
       manifest: {
-        name: 'MEAL Guardianes del Mar Wayuu',
-        short_name: 'MEAL Wayuu',
-        description: 'Sistema de Monitoreo, Evaluación, Rendición de Cuentas y Aprendizaje offline-first para comunidades pesqueras Wayuu en La Guajira.',
+        // Nombre de PLATAFORMA (multi-tenant): lo específico de cada convenio
+        // es configuración del tenant, no de la app (DRT 1.1, regla de oro).
+        name: 'Plataforma MEAL — Fundación Guajira Competitiva',
+        short_name: 'MEAL',
+        description: 'Plataforma multi-proyecto de Monitoreo, Evaluación, Aprendizaje y Rendición de Cuentas, offline-first, de la Fundación Guajira Competitiva.',
         theme_color: '#059669',
         background_color: '#020617',
         display: 'standalone',

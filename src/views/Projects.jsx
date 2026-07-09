@@ -1,16 +1,35 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, addWithSignature } from '../db';
+import { db, addWithSignature, putWithSignature, logAudit } from '../db';
 import { updatePendingCount } from '../syncEngine';
-import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play, Save, Plus } from 'lucide-react';
+import { useTenant } from '../context/TenantContext';
+import { CAP, can } from '../lib/roles';
+import { archiveRecord, restoreRecord, hardDelete, isArchived } from '../lib/configActions';
+import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play, Save, Plus, Archive, RotateCcw, Trash2, FilePen } from 'lucide-react';
 
 export default function Projects({ currentUser }) {
-  const isAdmin = currentUser?.role === 'admin';
+  const { activeTenantId, capabilities } = useTenant();
+  const isAdmin = can(capabilities, CAP.EDIT_CATALOG); // puede editar el catálogo del tenant
+  const canDelete = can(capabilities, CAP.DELETE_CONFIG);
+  const cfgCtx = { tenantId: activeTenantId, userId: currentUser?.id, userEmail: currentUser?.email };
+  const [showArchivedNodes, setShowArchivedNodes] = useState(false);
+  const [nodeMsg, setNodeMsg] = useState('');
+  const nodeArchive = async (n) => { await (isArchived('logframes', n) ? restoreRecord : archiveRecord)('logframes', db.logframes, n, cfgCtx); };
+  const nodeDelete = async (n) => { if (!confirm(`¿Eliminar definitivamente el nodo "${n.code}"?`)) return; try { await hardDelete('logframes', db.logframes, n, cfgCtx); } catch (e) { setNodeMsg(e.message); } };
+  const editNodeDesc = async (n) => {
+    const nueva = prompt('Editar descripción del nodo:', n.description || '');
+    if (nueva == null) return;
+    await putWithSignature(db.logframes, { ...n, description: nueva, updated_at: new Date().toISOString(), sync_status: 'pending_sync' });
+    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'logframes', entidadId: n.id });
+    await updatePendingCount();
+  };
 
-  // Obtener datos reactivos locales
-  const projects = useLiveQuery(() => db.projects.toArray()) || [];
-  const logframes = useLiveQuery(() => db.logframes.toArray()) || [];
-  const indicators = useLiveQuery(() => db.indicators.toArray()) || [];
+  // Datos reactivos locales SCOPEADOS al tenant activo (aislamiento M0)
+  const byTenant = (store) => () =>
+    activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
+  const projects = useLiveQuery(byTenant(db.projects), [activeTenantId]) || [];
+  const logframes = useLiveQuery(byTenant(db.logframes), [activeTenantId]) || [];
+  const indicators = useLiveQuery(byTenant(db.indicators), [activeTenantId]) || [];
 
   // Estados de vista
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -41,12 +60,14 @@ export default function Projects({ currentUser }) {
 
     const newProject = {
       id: newId,
+      tenant_id: activeTenantId,
       name,
       description,
       start_date: startDate,
       end_date: endDate,
       status: 'planning',
-      updated_at: now
+      updated_at: now,
+      sync_status: 'pending_sync'
     };
 
     try {
@@ -99,7 +120,7 @@ export default function Projects({ currentUser }) {
       ];
 
       for (const node of baseNodes) {
-        await addWithSignature(db.logframes, node);
+        await addWithSignature(db.logframes, { ...node, tenant_id: activeTenantId, sync_status: 'pending_sync' });
       }
 
       // Resetear formulario
@@ -126,12 +147,14 @@ export default function Projects({ currentUser }) {
 
     const newNode = {
       id: newId,
+      tenant_id: activeTenantId,
       project_id: activeProject.id,
       type: nodeType,
       code: nodeCode,
       parent_id: nodeType === 'impact' ? null : (nodeParentId || null),
       description: nodeDescription,
-      updated_at: now
+      updated_at: now,
+      sync_status: 'pending_sync'
     };
 
     try {
@@ -148,10 +171,20 @@ export default function Projects({ currentUser }) {
     }
   };
 
-  // Filtrar marco lógico del proyecto activo
-  const projectLogframes = activeProject 
-    ? logframes.filter(lf => lf.project_id === activeProject.id)
+  // Filtrar marco lógico del proyecto activo (ocultando nodos archivados salvo toggle)
+  const projectLogframes = activeProject
+    ? logframes.filter(lf => lf.project_id === activeProject.id && (showArchivedNodes || !isArchived('logframes', lf)))
     : [];
+
+  // Botones de acción por nodo del marco lógico (editar / archivar / eliminar)
+  const nodeActions = (n) => (
+    <span style={{ display: 'inline-flex', gap: '0.25rem', marginLeft: '0.5rem', verticalAlign: 'middle' }}>
+      {isArchived('logframes', n) && <span className="badge" style={{ fontSize: '0.58rem', background: 'rgba(148,163,184,0.15)', color: '#cbd5e1' }}>archivado</span>}
+      <button onClick={() => editNodeDesc(n)} className="btn btn-secondary" style={{ padding: '0.12rem 0.35rem', fontSize: '0.6rem' }} title="Editar descripción"><FilePen size={10} /></button>
+      <button onClick={() => nodeArchive(n)} className="btn btn-secondary" style={{ padding: '0.12rem 0.35rem', fontSize: '0.6rem' }} title={isArchived('logframes', n) ? 'Restaurar' : 'Archivar'}>{isArchived('logframes', n) ? <RotateCcw size={10} /> : <Archive size={10} />}</button>
+      {canDelete && <button onClick={() => nodeDelete(n)} className="btn btn-danger" style={{ padding: '0.12rem 0.35rem', fontSize: '0.6rem' }} title="Eliminar"><Trash2 size={10} /></button>}
+    </span>
+  );
 
   // Extraer los elementos raíz del Marco Lógico (Impacto)
   const impacts = projectLogframes.filter(lf => lf.type === 'impact');
@@ -320,15 +353,22 @@ export default function Projects({ currentUser }) {
                 </div>
 
                 {isAdmin && (
-                  <button 
-                    onClick={() => setShowAddNodeForm(!showAddNodeForm)} 
-                    className="btn btn-secondary"
-                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                  >
-                    <Plus size={14} /> Diseñar Matriz
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={showArchivedNodes} onChange={e => setShowArchivedNodes(e.target.checked)} style={{ width: 'auto' }} />
+                      <Archive size={13} /> Ver archivados
+                    </label>
+                    <button
+                      onClick={() => setShowAddNodeForm(!showAddNodeForm)}
+                      className="btn btn-secondary"
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                    >
+                      <Plus size={14} /> Diseñar Matriz
+                    </button>
+                  </div>
                 )}
               </div>
+              {nodeMsg && <div className="badge badge-info" style={{ display: 'block', padding: '0.5rem', fontSize: '0.72rem', whiteSpace: 'normal', width: 'fit-content' }}>{nodeMsg}</div>}
 
               {/* Formulario Agregar Nodo al Marco Lógico (Pilar 2) */}
               {showAddNodeForm && isAdmin && (
@@ -422,7 +462,7 @@ export default function Projects({ currentUser }) {
                               <Award size={12} /> {imp.code}
                             </span>
                             <div>
-                              <strong style={{ color: 'var(--primary-light)', fontSize: '0.95rem' }}>Impacto (Objetivo General):</strong>
+                              <strong style={{ color: 'var(--primary-light)', fontSize: '0.95rem' }}>Impacto (Objetivo General):</strong>{isAdmin && nodeActions(imp)}
                               <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{imp.description}</p>
                             </div>
                           </div>
@@ -443,7 +483,7 @@ export default function Projects({ currentUser }) {
                                     <Target size={12} /> {out.code}
                                   </span>
                                   <div>
-                                    <strong style={{ color: 'var(--secondary-light)', fontSize: '0.9rem' }}>Resultado (Outcome):</strong>
+                                    <strong style={{ color: 'var(--secondary-light)', fontSize: '0.9rem' }}>Resultado (Outcome):</strong>{isAdmin && nodeActions(out)}
                                     <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', display: 'block', marginTop: '0.15rem' }}>{out.description}</span>
                                   </div>
                                 </div>
@@ -477,6 +517,7 @@ export default function Projects({ currentUser }) {
                                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                             <strong>Producto (Output):</strong> {outp.description}
                                           </span>
+                                          {isAdmin && nodeActions(outp)}
                                         </div>
 
                                         {/* Indicadores de Producto */}
@@ -502,6 +543,7 @@ export default function Projects({ currentUser }) {
                                                     <Play size={8} /> {act.code}
                                                   </span>
                                                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{act.description}</span>
+                                                  {isAdmin && nodeActions(act)}
                                                 </div>
 
                                                 {/* Indicadores de Actividad */}

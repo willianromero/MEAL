@@ -1,51 +1,57 @@
 import React from 'react';
 import { isSupabaseConfigured } from '../supabaseClient';
-import { 
-  LayoutDashboard, 
-  Briefcase, 
-  BarChart3, 
-  ClipboardList, 
-  MessageSquare, 
-  BookOpen, 
-  ShieldCheck, 
+import { useTenant } from '../context/TenantContext';
+import { CAP, can, roleLabel } from '../lib/roles';
+import {
+  LayoutDashboard,
+  Briefcase,
+  BarChart3,
+  ClipboardList,
+  MessageSquare,
+  BookOpen,
+  ShieldCheck,
   Globe,
+  Building2,
+  Layers,
+  ClipboardCheck,
+  UserSquare,
+  FolderOpen,
+  ScrollText,
+  FileBarChart,
   Users as UsersIcon,
   X
 } from 'lucide-react';
 
 export default function Sidebar({ currentView, setCurrentView, currentUser, isMobileOpen, onClose, onLogout }) {
-  const userRole = currentUser?.role || 'officer';
+  const { capabilities, tenantRole, platformRole, tenantConfig, isPlatform } = useTenant();
   const userEmail = currentUser?.email || 'anonimo@meal.org';
 
-  // Mapeo de vistas y roles permitidos (Pilar 2 - RLS/RBAC en UI)
+  // Navegación gobernada por capacidades (DRT 3.2). La segregación de funciones
+  // decide qué módulos ve cada rol, no una lista fija de roles por vista.
   const navItems = [
-    { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'projects', name: 'Proyectos & LogFrames', icon: <Briefcase size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'indicators', name: 'Indicadores MEAL', icon: <BarChart3 size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'surveys', name: 'Encuestas Offline', icon: <ClipboardList size={18} />, roles: ['admin', 'officer'] },
-    { id: 'feedback', name: 'Rendición de Cuentas', icon: <MessageSquare size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'lessons', name: 'Lecciones Aprendidas', icon: <BookOpen size={18} />, roles: ['admin', 'officer', 'viewer'] },
-    { id: 'users', name: 'Control de Usuarios', icon: <UsersIcon size={18} />, roles: ['admin'] }, // Panel exclusivo Admin
-    { id: 'auth', name: 'Sesión de Acceso', icon: <ShieldCheck size={18} />, roles: ['admin', 'officer', 'viewer'] }
+    { id: 'dashboard', name: 'Dashboard', icon: <LayoutDashboard size={18} />, cap: CAP.VIEW_DASHBOARD },
+    { id: 'tenants', name: 'Consola de Proyectos', icon: <Building2 size={18} />, cap: CAP.MANAGE_TENANTS },
+    { id: 'projects', name: 'Proyectos & Marco Lógico', icon: <Briefcase size={18} />, cap: CAP.VIEW_CATALOG },
+    { id: 'catalog', name: 'Catálogo Maestro', icon: <Layers size={18} />, cap: CAP.VIEW_CATALOG },
+    { id: 'formbuilder', name: 'Formularios', icon: <ClipboardList size={18} />, cap: CAP.EDIT_CATALOG },
+    { id: 'indicators', name: 'Indicadores MEAL', icon: <BarChart3 size={18} />, cap: CAP.VIEW_CATALOG },
+    { id: 'capture', name: 'Captura Offline', icon: <ClipboardList size={18} />, cap: CAP.CAPTURE },
+    { id: 'validation', name: 'Cola de Validación', icon: <ClipboardCheck size={18} />, cap: CAP.VALIDATE },
+    { id: 'surveys', name: 'Encuestas (legado)', icon: <ClipboardList size={18} />, cap: CAP.CAPTURE },
+    { id: 'feedback', name: 'PQRS / Rendición de Cuentas', icon: <MessageSquare size={18} />, cap: CAP.VIEW_DASHBOARD },
+    { id: 'beneficiaries', name: 'Beneficiarios', icon: <UserSquare size={18} />, cap: CAP.MANAGE_BENEFICIARIES },
+    { id: 'repository', name: 'Repositorio Documental', icon: <FolderOpen size={18} />, cap: CAP.VIEW_CATALOG },
+    { id: 'lessons', name: 'Lecciones Aprendidas', icon: <BookOpen size={18} />, cap: CAP.VIEW_DASHBOARD },
+    { id: 'reports', name: 'Reportes y Export', icon: <FileBarChart size={18} />, cap: CAP.EXPORT },
+    { id: 'audit', name: 'Bitácora de Auditoría', icon: <ScrollText size={18} />, cap: CAP.VIEW_AUDIT },
+    { id: 'users', name: 'Usuarios del Proyecto', icon: <UsersIcon size={18} />, cap: CAP.MANAGE_USERS },
+    { id: 'auth', name: 'Sesión de Acceso', icon: <ShieldCheck size={18} />, cap: null }
   ];
 
-  const getRoleLabel = (role) => {
-    switch (role) {
-      case 'admin': return 'Administrador';
-      case 'officer': return 'Oficial de Campo';
-      case 'viewer': return 'Visualizador';
-      default: return role;
-    }
-  };
-
-  const getRoleBadgeColor = (role) => {
-    switch (role) {
-      case 'admin': return 'rgba(239, 68, 68, 0.12)';
-      case 'officer': return 'rgba(5, 150, 105, 0.12)';
-      case 'viewer': return 'rgba(14, 165, 233, 0.12)';
-      default: return 'rgba(255,255,255,0.05)';
-    }
-  };
+  const effectiveRole = isPlatform ? platformRole : (tenantRole || platformRole);
+  const roleName = roleLabel(effectiveRole, tenantConfig);
+  const badgeColor = isPlatform ? 'rgba(239, 68, 68, 0.12)' : 'rgba(5, 150, 105, 0.12)';
+  const badgeText = isPlatform ? '#fca5a5' : '#a7f3d0';
 
   return (
     <aside className={`glass-panel sidebar-layout ${isMobileOpen ? 'open' : ''}`}>
@@ -91,7 +97,7 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
             MEAL System
           </span>
           <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 'bold' }}>
-            Guardianes Wayuu
+            Multi-proyecto
           </div>
         </div>
       </div>
@@ -99,7 +105,7 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
       {/* Navegación */}
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
         {navItems.map((item) => {
-          const hasAccess = item.roles.includes(userRole);
+          const hasAccess = item.cap === null || can(capabilities, item.cap);
           if (!hasAccess) return null;
 
           const isActive = currentView === item.id;
@@ -151,19 +157,20 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={userEmail}>
           Usuario: {userEmail}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Rol:</span>
-          <span 
-            className="badge" 
-            style={{ 
-              background: getRoleBadgeColor(userRole),
-              color: userRole === 'admin' ? '#fca5a5' : userRole === 'officer' ? '#a7f3d0' : '#e0f2fe',
-              border: `1px solid ${userRole === 'admin' ? 'rgba(239, 68, 68, 0.25)' : userRole === 'officer' ? 'rgba(5, 150, 105, 0.25)' : 'rgba(14, 165, 233, 0.25)'}`,
-              padding: '0.1rem 0.4rem', 
-              fontSize: '0.65rem' 
+          <span
+            className="badge"
+            style={{
+              background: badgeColor,
+              color: badgeText,
+              border: `1px solid ${isPlatform ? 'rgba(239, 68, 68, 0.25)' : 'rgba(5, 150, 105, 0.25)'}`,
+              padding: '0.1rem 0.4rem',
+              fontSize: '0.65rem',
+              textAlign: 'right'
             }}
           >
-            {getRoleLabel(userRole)}
+            {roleName}
           </span>
         </div>
         
