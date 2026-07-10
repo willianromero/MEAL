@@ -29,15 +29,19 @@ Verás 7 archivos:
 - `004_config_edit.sql`  ← habilita editar/archivar/eliminar configuración desde la app
 - `005_tenant_suspend.sql`  ← hace que "Suspender" un proyecto bloquee de verdad el acceso
 - `006_security_hardening.sql`  ← cierra 3 brechas de permisos encontradas en auditoría general
+- `007_postgis_rls_advisor.sql`  ← cierra el aviso "RLS Disabled in Public" del Security Advisor de Supabase
 
-> **Nota:** si ya tenías la base montada de antes, basta con aplicar el nuevo
-> `006_security_hardening.sql` (SQL Editor → pegar → Run). Cierra: (1) el
-> borrado definitivo de configuración, que un Coordinador podía ejecutar vía
-> API aunque la app no se lo mostrara; (2) la validación de registros de
-> campo, que no exigía rol de Coordinador/Administrador para validar el dato
-> de otra persona (solo bloqueaba auto-validarse); (3) la edición directa de
-> la fila de un proyecto en `tenants`, que un Administrador de Tenant podía
-> hacer vía API sin que ninguna pantalla se lo permitiera. Es idempotente.
+> **Nota:** si ya tenías la base montada de antes, basta con aplicar los nuevos
+> `006_security_hardening.sql` y `007_postgis_rls_advisor.sql` (SQL Editor →
+> pegar → Run, uno tras otro). El 006 cierra: (1) el borrado definitivo de
+> configuración, que un Coordinador podía ejecutar vía API aunque la app no se
+> lo mostrara; (2) la validación de registros de campo, que no exigía rol de
+> Coordinador/Administrador para validar el dato de otra persona (solo
+> bloqueaba auto-validarse); (3) la edición directa de la fila de un proyecto
+> en `tenants`, que un Administrador de Tenant podía hacer vía API sin que
+> ninguna pantalla se lo permitiera. El 007 activa RLS de solo lectura sobre
+> `spatial_ref_sys` (tabla de catálogo de PostGIS, sin datos propios) para que
+> el Advisor de Supabase deje de marcarla como error. Ambos son idempotentes.
 
 ---
 

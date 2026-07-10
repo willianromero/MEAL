@@ -38,6 +38,22 @@ describe('Reports.jsx — exportaciones respetan la reserva de identidad PQRS', 
   });
 });
 
+describe('007_postgis_rls_advisor — cierra el aviso "RLS Disabled in Public"', () => {
+  const sql = readFileSync('supabase/migrations/007_postgis_rls_advisor.sql', 'utf8');
+
+  it('activa RLS en spatial_ref_sys', () => {
+    expect(sql).toMatch(/alter table public\.spatial_ref_sys enable row level security/);
+  });
+
+  it('permite lectura pública (necesaria para que PostGIS calcule coordenadas)', () => {
+    expect(sql).toMatch(/for select using \(true\)/);
+  });
+
+  it('no agrega políticas de escritura (catálogo de solo lectura de la extensión)', () => {
+    expect(sql).not.toMatch(/for (insert|update|delete)/);
+  });
+});
+
 describe('Indicators.jsx — congelar línea base restringido al rol correcto', () => {
   const src = readFileSync('src/views/Indicators.jsx', 'utf8');
 
