@@ -25,6 +25,7 @@ export default function SyncIndicator() {
     isOnline: navigator.onLine,
     isSyncing: false,
     pendingCount: 0,
+    errorCount: 0,
     lastSyncedAt: 'Nunca',
     error: null,
     isSimulatedOffline: false
@@ -145,6 +146,10 @@ export default function SyncIndicator() {
     statusText = sync.isSimulatedOffline ? 'Offline (Simulado)' : 'Desconectado';
     badgeClass = 'badge-warning';
     statusIcon = <WifiOff size={16} />;
+  } else if (sync.errorCount > 0) {
+    statusText = `${sync.errorCount} con error de sincronización`;
+    badgeClass = 'badge-warning';
+    statusIcon = <AlertTriangle size={16} />;
   } else if (sync.pendingCount > 0) {
     statusText = `${sync.pendingCount} Pendiente(s)`;
     badgeClass = 'badge-info';

@@ -6,6 +6,7 @@ import { useTenant } from '../context/TenantContext';
 import { CAP, can } from '../lib/roles';
 import { logAudit } from '../db';
 import { archiveRecord, restoreRecord, hardDelete, isArchived } from '../lib/configActions';
+import { generateIndicatorCode } from '../lib/codeGenerator';
 import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye, Plus, Lock, Snowflake, Archive, RotateCcw, Trash2, FilePen } from 'lucide-react';
 
 export default function Indicators({ currentUser }) {
@@ -92,9 +93,10 @@ export default function Indicators({ currentUser }) {
   const [formError, setFormError] = useState('');
 
   // Formulario nuevo indicador (Pilar 1 - Monitoreo)
+  // El código YA NO se captura a mano: se calcula solo (ver newIndCode más
+  // abajo) para eliminar el error de usuario de códigos manuales.
   const [newIndProjectId, setNewIndProjectId] = useState('');
   const [newIndLogframeId, setNewIndLogframeId] = useState('');
-  const [newIndCode, setNewIndCode] = useState('');
   const [newIndName, setNewIndName] = useState('');
   const [newIndUnit, setNewIndUnit] = useState('Participantes');
   const [newIndBaseline, setNewIndBaseline] = useState(0);
@@ -109,6 +111,15 @@ export default function Indicators({ currentUser }) {
   const filteredLogframesForNewInd = newIndProjectId
     ? logframes.filter(lf => lf.project_id === newIndProjectId)
     : [];
+
+  // Código autogenerado del nuevo indicador (ver src/lib/codeGenerator.js):
+  // IND-{resultado}.{posición}, calculado sobre TODOS los indicadores del
+  // proyecto (incluidos los archivados, para no reutilizar un código).
+  const selectedLogframeNodeForNewInd = filteredLogframesForNewInd.find(lf => lf.id === newIndLogframeId) || null;
+  const indicatorsOfProjectIncludingArchived = newIndProjectId
+    ? indicators.filter(i => i.project_id === newIndProjectId)
+    : [];
+  const newIndCode = generateIndicatorCode(selectedLogframeNodeForNewInd, filteredLogframesForNewInd, indicatorsOfProjectIncludingArchived);
 
   const handleStartEdit = (ind) => {
     if (isViewer) return;
@@ -228,8 +239,9 @@ export default function Indicators({ currentUser }) {
     try {
       // Guardar indicador con firma criptográfica SHA-256 (Pilar 3)
       await addWithSignature(db.indicators, newIndicator);
-      
-      setNewIndCode('');
+
+      // Se conservan proyecto y componente seleccionados: el próximo código
+      // se autogenera con el siguiente número (útil al cargar varios seguidos).
       setNewIndName('');
       setNewIndUnit('Participantes');
       setNewIndBaseline(0);
@@ -311,13 +323,13 @@ export default function Indicators({ currentUser }) {
             </div>
 
             <div className="form-group">
-              <label>Código del Indicador *</label>
-              <input 
-                type="text" 
-                placeholder="Ej: IND-1.2, IND-3.1" 
-                value={newIndCode}
-                onChange={e => setNewIndCode(e.target.value)}
-                required
+              <label>Código del Indicador (automático)</label>
+              <input
+                type="text"
+                readOnly
+                value={newIndCode || 'Elige proyecto y componente →'}
+                title="Generado automáticamente a partir del componente del marco lógico"
+                style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--primary-light)', fontWeight: 700, cursor: 'not-allowed' }}
               />
             </div>
 

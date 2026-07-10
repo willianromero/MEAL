@@ -29,17 +29,32 @@ export function TenantProvider({ currentUser, children }) {
     []
   );
 
-  // Tenants visibles para este usuario
-  const tenants = useMemo(() => {
+  // Tenants de los que el usuario es miembro (sin filtrar por estado todavía)
+  const memberTenants = useMemo(() => {
     if (!allTenants) return [];
-    if (isPlatform) return allTenants; // plataforma ve el portafolio completo
     if (memberships && memberships.length > 0) {
       const ids = new Set(memberships.map(m => m.tenant_id));
       return allTenants.filter(t => ids.has(t.id));
     }
     // Fallback demo (sin Supabase, sin membresías sembradas): acceso a todos
     return allTenants;
-  }, [allTenants, memberships, isPlatform]);
+  }, [allTenants, memberships]);
+
+  // Tenants OPERABLES para este usuario: la plataforma ve el portafolio
+  // completo (incluidos suspendidos, para poder reactivarlos); un miembro de
+  // tenant solo puede seleccionar/trabajar en proyectos con estado 'activo'
+  // (un proyecto suspendido queda bloqueado también en el backend, RLS 005).
+  const tenants = useMemo(() => {
+    if (isPlatform) return allTenants || [];
+    return memberTenants.filter(t => (t.estado || 'activo') === 'activo');
+  }, [allTenants, memberTenants, isPlatform]);
+
+  // Proyectos del usuario que están suspendidos/cerrados (para avisarle en
+  // vez de que el proyecto simplemente desaparezca sin explicación).
+  const suspendedMemberTenants = useMemo(
+    () => (isPlatform ? [] : memberTenants.filter(t => (t.estado || 'activo') !== 'activo')),
+    [memberTenants, isPlatform]
+  );
 
   // Fijar un tenant activo por defecto cuando haya tenants disponibles
   useEffect(() => {
@@ -82,6 +97,7 @@ export function TenantProvider({ currentUser, children }) {
 
   const value = {
     tenants,
+    suspendedMemberTenants,
     activeTenant,
     activeTenantId,
     setActiveTenant,

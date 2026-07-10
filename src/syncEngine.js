@@ -30,6 +30,7 @@ let syncState = {
   isOnline: navigator.onLine,
   isSyncing: false,
   pendingCount: 0,
+  errorCount: 0,
   lastSyncedAt: 'Nunca',
   error: null,
   isSimulatedOffline: false
@@ -50,10 +51,13 @@ export function subscribeToSyncState(cb) {
 export async function updatePendingCount() {
   try {
     let total = 0;
+    let errors = 0;
     for (const { store } of SYNC_TABLES) {
       total += await store().where('sync_status').anyOf(['pending_sync', 'error']).count();
+      errors += await store().where('sync_status').equals('error').count();
     }
     syncState.pendingCount = total;
+    syncState.errorCount = errors;
 
     const meta = await db.sync_meta.get('last_synced_at');
     if (meta && meta.value !== '1970-01-01T00:00:00.000Z') {
@@ -63,10 +67,41 @@ export async function updatePendingCount() {
     }
 
     notifySubscribers();
+
+    // Auto-disparo: cada escritura local llama a updatePendingCount(), así que
+    // este es el punto único donde "hay algo pendiente" se detecta. Se evita
+    // al usuario tener que pulsar "Sincronizar" manualmente (RF-OFF-2).
+    requestAutoSync();
   } catch (err) {
     console.error('Error calculando elementos pendientes:', err);
   }
 }
+
+// --- AUTO-SINCRONIZACIÓN ---
+// Se dispara sola tras cada escritura local (vía updatePendingCount) y de
+// forma periódica en segundo plano, para no depender de que el usuario pulse
+// "Sincronizar". Con un piso mínimo entre disparos para no saturar la red si
+// hay muchas escrituras seguidas (ej. varios indicadores creados rápido).
+const AUTO_TRIGGER_MIN_INTERVAL_MS = 3000;
+let lastAutoTriggerAt = 0;
+
+function requestAutoSync() {
+  if (syncState.pendingCount === 0) return;
+  if (!syncState.isOnline || syncState.isSyncing) return;
+  const now = Date.now();
+  if (now - lastAutoTriggerAt < AUTO_TRIGGER_MIN_INTERVAL_MS) return;
+  lastAutoTriggerAt = now;
+  triggerSync();
+}
+
+// Reintento periódico en segundo plano: cubre fallas transitorias de red y
+// autolibera un candado huérfano (ver lockTimeoutMs) sin acción del usuario.
+const BACKGROUND_RETRY_INTERVAL_MS = 30000;
+setInterval(() => {
+  if (syncState.pendingCount > 0 && syncState.isOnline && !syncState.isSyncing) {
+    triggerSync();
+  }
+}, BACKGROUND_RETRY_INTERVAL_MS);
 
 export function setSimulatedOffline(value) {
   syncState.isSimulatedOffline = value;
@@ -107,7 +142,11 @@ export async function triggerSync() {
 
   let hasLock = false;
   const nowMs = Date.now();
-  const lockTimeoutMs = 5 * 60 * 1000;
+  // Ventana corta a propósito: las operaciones de push/pull son idempotentes
+  // (upsert por id), así que un candado duplicado no corrompe nada; en cambio
+  // un candado huérfano (pestaña recargada a mitad de sync) NO debe bloquear
+  // la sincronización más de un minuto.
+  const lockTimeoutMs = 60 * 1000;
 
   try {
     await db.transaction('rw', db.sync_meta, async () => {
