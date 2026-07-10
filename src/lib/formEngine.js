@@ -17,7 +17,8 @@ export const FIELD_TYPES = {
   firma: { label: 'Firma', input: 'firma' },
   bool: { label: 'Sí / No', input: 'bool' },
   escala: { label: 'Escala 1-5', input: 'escala' },
-  checklist: { label: 'Lista de chequeo (varias opciones)', input: 'checklist' }
+  checklist: { label: 'Lista de chequeo (varias opciones)', input: 'checklist' },
+  documento: { label: 'Documento (PDF u otro archivo)', input: 'documento' }
 };
 
 // ¿Debe mostrarse el campo dado el estado actual del formulario?

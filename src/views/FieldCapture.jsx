@@ -55,10 +55,10 @@ export default function FieldCapture({ currentUser }) {
     );
   };
 
-  const addPhoto = (fieldName, file) => {
+  const addPhoto = (fieldName, file, tipoEvidencia = 'foto') => {
     if (!file) return;
-    setPendingPhotos(prev => [...prev.filter(p => p.name !== fieldName), { name: fieldName, file }]);
-    setField(fieldName, `[foto:${file.name}]`);
+    setPendingPhotos(prev => [...prev.filter(p => p.name !== fieldName), { name: fieldName, file, tipo: tipoEvidencia }]);
+    setField(fieldName, `[${tipoEvidencia}:${file.name}]`);
   };
 
   const handleSubmit = async (e) => {
@@ -92,9 +92,9 @@ export default function FieldCapture({ currentUser }) {
 
     try {
       await addWithSignature(db.field_records, record);
-      // Evidencias: se comprimen y guardan como blob; subida diferida (8.3)
-      for (const { name, file } of pendingPhotos) {
-        const ev = await buildEvidence({ tenantId: activeTenantId, registroId: recordId, file, tipo: 'foto', geopunto: geopunto || null });
+      // Evidencias: las fotos se comprimen, los documentos se suben tal cual (8.3)
+      for (const { file, tipo } of pendingPhotos) {
+        const ev = await buildEvidence({ tenantId: activeTenantId, registroId: recordId, file, tipo, geopunto: geopunto || null });
         await addWithSignature(db.evidences, ev);
       }
       setSuccess(true);
@@ -156,7 +156,15 @@ export default function FieldCapture({ currentUser }) {
       case 'foto':
         control = (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input type="file" accept="image/*" capture="environment" onChange={e => addPhoto(campo.name, e.target.files?.[0])} style={{ fontSize: '0.8rem' }} />
+            <input type="file" accept="image/*" capture="environment" onChange={e => addPhoto(campo.name, e.target.files?.[0], 'foto')} style={{ fontSize: '0.8rem' }} />
+            {pendingPhotos.find(p => p.name === campo.name) && <Check size={16} style={{ color: 'var(--primary-light)' }} />}
+          </div>
+        );
+        break;
+      case 'documento':
+        control = (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input type="file" accept="application/pdf,image/*" onChange={e => addPhoto(campo.name, e.target.files?.[0], 'documento')} style={{ fontSize: '0.8rem' }} />
             {pendingPhotos.find(p => p.name === campo.name) && <Check size={16} style={{ color: 'var(--primary-light)' }} />}
           </div>
         );
