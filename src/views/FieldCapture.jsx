@@ -55,10 +55,10 @@ export default function FieldCapture({ currentUser }) {
     );
   };
 
-  const addPhoto = (fieldName, file) => {
+  const addPhoto = (fieldName, file, tipoEvidencia = 'foto') => {
     if (!file) return;
-    setPendingPhotos(prev => [...prev.filter(p => p.name !== fieldName), { name: fieldName, file }]);
-    setField(fieldName, `[foto:${file.name}]`);
+    setPendingPhotos(prev => [...prev.filter(p => p.name !== fieldName), { name: fieldName, file, tipo: tipoEvidencia }]);
+    setField(fieldName, `[${tipoEvidencia}:${file.name}]`);
   };
 
   const handleSubmit = async (e) => {
@@ -92,9 +92,9 @@ export default function FieldCapture({ currentUser }) {
 
     try {
       await addWithSignature(db.field_records, record);
-      // Evidencias: se comprimen y guardan como blob; subida diferida (8.3)
-      for (const { name, file } of pendingPhotos) {
-        const ev = await buildEvidence({ tenantId: activeTenantId, registroId: recordId, file, tipo: 'foto', geopunto: geopunto || null });
+      // Evidencias: las fotos se comprimen, los documentos se suben tal cual (8.3)
+      for (const { file, tipo } of pendingPhotos) {
+        const ev = await buildEvidence({ tenantId: activeTenantId, registroId: recordId, file, tipo, geopunto: geopunto || null });
         await addWithSignature(db.evidences, ev);
       }
       setSuccess(true);
@@ -156,7 +156,15 @@ export default function FieldCapture({ currentUser }) {
       case 'foto':
         control = (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input type="file" accept="image/*" capture="environment" onChange={e => addPhoto(campo.name, e.target.files?.[0])} style={{ fontSize: '0.8rem' }} />
+            <input type="file" accept="image/*" capture="environment" onChange={e => addPhoto(campo.name, e.target.files?.[0], 'foto')} style={{ fontSize: '0.8rem' }} />
+            {pendingPhotos.find(p => p.name === campo.name) && <Check size={16} style={{ color: 'var(--primary-light)' }} />}
+          </div>
+        );
+        break;
+      case 'documento':
+        control = (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input type="file" accept="application/pdf,image/*" onChange={e => addPhoto(campo.name, e.target.files?.[0], 'documento')} style={{ fontSize: '0.8rem' }} />
             {pendingPhotos.find(p => p.name === campo.name) && <Check size={16} style={{ color: 'var(--primary-light)' }} />}
           </div>
         );
@@ -164,6 +172,25 @@ export default function FieldCapture({ currentUser }) {
       case 'firma':
         control = <input type="text" value={val} onChange={e => setField(campo.name, e.target.value)} placeholder="Nombre de quien firma (firma digital simple)" />;
         break;
+      case 'checklist': {
+        const seleccion = Array.isArray(val) ? val : [];
+        const toggle = (opcion) => {
+          const next = seleccion.includes(opcion) ? seleccion.filter(o => o !== opcion) : [...seleccion, opcion];
+          setField(campo.name, next);
+        };
+        control = (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            {(campo.opciones || []).map((op, i) => (
+              <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={seleccion.includes(op)} onChange={() => toggle(op)} style={{ width: 'auto' }} />
+                {op}
+              </label>
+            ))}
+            {(!campo.opciones || campo.opciones.length === 0) && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Este campo no tiene opciones configuradas.</span>}
+          </div>
+        );
+        break;
+      }
       default:
         control = <input type="text" value={val} onChange={e => setField(campo.name, e.target.value)} />;
     }

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, addWithSignature } from '../db';
+import { db, addWithSignature, putWithSignature, logAudit } from '../db';
 import { updatePendingCount } from '../syncEngine';
 import { evaluateRule } from '../lib/rulesEngine';
 import SignatureVerifier from '../components/SignatureVerifier';
 import { useTenant } from '../context/TenantContext';
 import { CAP, can } from '../lib/roles';
-import { ClipboardList, Plus, FileText, Send, MapPin, Check, Info, Trash2, ShieldAlert, Award, Eye } from 'lucide-react';
+import { ClipboardList, Plus, FileText, Send, MapPin, Check, Info, Trash2, ShieldAlert, Award, Eye, FilePen, X } from 'lucide-react';
 
 // Regla determinista JSON para evaluar Carencia Productiva Crítica (Pilar 2)
 const CRITICAL_POVERTY_RULE = {
@@ -39,6 +39,7 @@ export default function Surveys({ currentUser }) {
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
   // Estados del Diseñador de Encuestas (Admin)
+  const [editingSurveyId, setEditingSurveyId] = useState(null); // null = creando; id = editando
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyDesc, setSurveyDesc] = useState('');
   const [selectedIndicatorId, setSelectedIndicatorId] = useState('');
@@ -49,6 +50,26 @@ export default function Surveys({ currentUser }) {
 
   const activeSurvey = surveys.find(s => s.id === selectedSurveyId);
   const activeResponses = responses.filter(r => r.survey_id === selectedSurveyId);
+
+  const resetDesigner = () => {
+    setEditingSurveyId(null);
+    setSurveyTitle(''); setSurveyDesc(''); setSelectedIndicatorId('');
+    setFields([{ name: 'nombre_participante', label: 'Nombre del Participante', type: 'text', required: true }]);
+  };
+
+  // Precarga el diseñador con una encuesta existente para editarla en el sitio.
+  const startEditSurvey = (s) => {
+    setEditingSurveyId(s.id);
+    setSurveyTitle(s.title);
+    setSurveyDesc(s.description || '');
+    setSelectedIndicatorId(s.indicator_id || '');
+    setFields((s.schema?.fields || []).map(f => ({
+      name: f.name, label: f.label, type: f.type, required: !!f.required,
+      options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '')
+    })));
+    setDesignError('');
+    setTab('design');
+  };
 
   // --- DISEÑADOR DE ENCUESTAS (ADMIN) ---
   const addFieldToSchema = () => {
@@ -78,37 +99,39 @@ export default function Surveys({ currentUser }) {
 
     const processedFields = fields.map(f => {
       const cleanF = { name: f.name.trim().toLowerCase().replace(/\s+/g, '_'), label: f.label, type: f.type, required: !!f.required };
-      if (f.type === 'select' && f.options) {
+      if ((f.type === 'select' || f.type === 'checklist') && f.options) {
         cleanF.options = f.options.split(',').map(o => o.trim());
       }
       return cleanF;
     });
 
-    const newId = `srv-uuid-${Math.random().toString(36).substr(2, 9)}`;
     const now = new Date().toISOString();
 
-    const newSurvey = {
-      id: newId,
-      tenant_id: activeTenantId,
-      title: surveyTitle,
-      description: surveyDesc,
-      indicator_id: selectedIndicatorId,
-      schema: { fields: processedFields },
-      created_by: currentUser.email,
-      updated_at: now,
-      sync_status: 'pending_sync'
-    };
-
     try {
-      // Guardar con firma criptográfica SHA-256 (Pilar 3)
-      await addWithSignature(db.surveys, newSurvey);
-      
-      setSurveyTitle('');
-      setSurveyDesc('');
-      setSelectedIndicatorId('');
-      setFields([{ name: 'nombre_participante', label: 'Nombre del Participante', type: 'text', required: true }]);
+      let savedId;
+      if (editingSurveyId) {
+        const original = surveys.find(s => s.id === editingSurveyId);
+        await putWithSignature(db.surveys, {
+          ...original, title: surveyTitle, description: surveyDesc,
+          indicator_id: selectedIndicatorId, schema: { fields: processedFields },
+          updated_at: now, sync_status: 'pending_sync'
+        });
+        await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'surveys', entidadId: editingSurveyId, despues: { title: surveyTitle, indicator_id: selectedIndicatorId } });
+        savedId = editingSurveyId;
+      } else {
+        savedId = `srv-uuid-${Math.random().toString(36).substr(2, 9)}`;
+        await addWithSignature(db.surveys, {
+          id: savedId, tenant_id: activeTenantId, title: surveyTitle, description: surveyDesc,
+          indicator_id: selectedIndicatorId, schema: { fields: processedFields },
+          created_by: currentUser.email, updated_at: now, sync_status: 'pending_sync'
+        });
+        await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'crear', entidad: 'surveys', entidadId: savedId, despues: { title: surveyTitle } });
+      }
+
+      await updatePendingCount();
+      resetDesigner();
       setTab('collect');
-      setSelectedSurveyId(newId);
+      setSelectedSurveyId(savedId);
     } catch (err) {
       console.error('Error guardando plantilla:', err);
       setDesignError('Error al registrar la plantilla en base de datos local.');
@@ -221,7 +244,7 @@ export default function Surveys({ currentUser }) {
           
           {isAdmin && (
             <button 
-              onClick={() => { setTab('design'); setSelectedSurveyId(null); }}
+              onClick={() => { resetDesigner(); setTab('design'); setSelectedSurveyId(null); }}
               className="btn"
               style={{ 
                 background: tab === 'design' ? 'var(--bg-dark)' : 'transparent',
@@ -288,9 +311,21 @@ export default function Surveys({ currentUser }) {
                         )}
                       </div>
                     </div>
-                    <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
-                      {respCount} Respuestas
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditSurvey(s); }}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.68rem' }}
+                          title="Editar campos de esta encuesta"
+                        >
+                          <FilePen size={11} /> Editar
+                        </button>
+                      )}
+                      <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
+                        {respCount} Respuestas
+                      </span>
+                    </div>
                   </div>
                 );
               })}
@@ -331,7 +366,7 @@ export default function Surveys({ currentUser }) {
                         <label>{f.label} {f.required && <span style={{ color: '#ef4444' }}>*</span>}</label>
                         
                         {f.type === 'select' ? (
-                          <select 
+                          <select
                             value={formData[f.name] || ''}
                             onChange={e => handleInputChange(f.name, e.target.value)}
                             required={f.required}
@@ -341,6 +376,19 @@ export default function Surveys({ currentUser }) {
                               <option key={oIdx} value={opt}>{opt}</option>
                             ))}
                           </select>
+                        ) : f.type === 'checklist' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            {(f.options || []).map((opt, oIdx) => {
+                              const seleccion = Array.isArray(formData[f.name]) ? formData[f.name] : [];
+                              const toggle = () => handleInputChange(f.name, seleccion.includes(opt) ? seleccion.filter(o => o !== opt) : [...seleccion, opt]);
+                              return (
+                                <label key={oIdx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                                  <input type="checkbox" checked={seleccion.includes(opt)} onChange={toggle} style={{ width: 'auto' }} />
+                                  {opt}
+                                </label>
+                              );
+                            })}
+                          </div>
                         ) : f.type === 'textarea' ? (
                           <textarea
                             rows="2"
@@ -485,8 +533,13 @@ export default function Surveys({ currentUser }) {
       {/* CONTENIDO TAB DISEÑADOR (ADMIN) */}
       {tab === 'design' && isAdmin && (
         <div className="glass-panel" style={{ padding: '2rem' }}>
-          <h2 style={{ marginBottom: '1.25rem' }}>Crear Nueva Plantilla de Encuesta</h2>
-          
+          <div className="flex-between" style={{ marginBottom: '1.25rem' }}>
+            <h2 style={{ margin: 0 }}>{editingSurveyId ? 'Editar Plantilla de Encuesta' : 'Crear Nueva Plantilla de Encuesta'}</h2>
+            {editingSurveyId && (
+              <button type="button" onClick={resetDesigner} className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}><X size={13} /> Cancelar edición</button>
+            )}
+          </div>
+
           <form onSubmit={handleSaveSurveyTemplate} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             
             {designError && (
@@ -571,17 +624,18 @@ export default function Surveys({ currentUser }) {
                     >
                       <option value="text">Texto</option>
                       <option value="number">Número</option>
-                      <option value="select">Selección Múltiple</option>
+                      <option value="select">Selección Única</option>
+                      <option value="checklist">Lista de chequeo (varias opciones)</option>
                       <option value="textarea">Área de Texto Libre</option>
                     </select>
                   </div>
 
-                  {field.type === 'select' ? (
+                  {(field.type === 'select' || field.type === 'checklist') ? (
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label style={{ fontSize: '0.75rem' }}>Opciones (Separadas por coma)</label>
-                      <input 
-                        type="text" 
-                        placeholder="Opción A, Opción B" 
+                      <input
+                        type="text"
+                        placeholder="Opción A, Opción B"
                         value={field.options || ''}
                         onChange={e => updateFieldInSchema(idx, 'options', e.target.value)}
                         required
@@ -614,7 +668,7 @@ export default function Surveys({ currentUser }) {
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }}>
-              Crear Plantilla de Encuesta
+              {editingSurveyId ? 'Guardar Cambios' : 'Crear Plantilla de Encuesta'}
             </button>
           </form>
         </div>

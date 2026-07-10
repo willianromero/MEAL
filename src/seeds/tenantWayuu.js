@@ -5,6 +5,18 @@ import { DEFAULT_PQRS_LEVELS, DEFAULT_ROLE_NAMES } from './defaults.js';
 const TENANT_ID = 'ten-wayuu';
 const PROJ_ID = 'proj-wayuu-001';
 
+// Formularios del motor moderno (tipos: texto, num, fecha, select, geo, foto,
+// documento, firma, bool, escala, checklist). Ampliación pedida por revisión
+// experta MEAL (2026): srv-wayuu-101/102 se editan en el motor legado (ya
+// tienen respuestas reales); estos 5 son formularios nuevos, capaces de
+// alimentar indicadores automáticamente vía indicator.formula.
+function form(id, codigo, nombre, lineaId, campos) {
+  return { id, codigo, nombre, linea_id: lineaId, version: 1, activo: true, campos };
+}
+const campoBase = (name, etiqueta, tipo, extra = {}) => ({
+  name, etiqueta_es: etiqueta, etiqueta_way: null, tipo, obligatorio: true, reglas_validacion: null, ...extra
+});
+
 export const tenantWayuu = {
   tenant: {
     id: TENANT_ID,
@@ -186,7 +198,7 @@ export const tenantWayuu = {
       meta_tipo: 'numero',
       frecuencia: 'mensual',
       medio_verificacion: 'Registros de asistencia y certificados de formación',
-      formula: null,
+      formula: { fuente: { formulario_id: 'frm-wayuu-104' }, operacion: 'suma', campo: 'numero_asistentes' },
       linea_base_valor: 0,
       linea_base_congelada: false,
       meta_ajustable: false,
@@ -236,7 +248,7 @@ export const tenantWayuu = {
       meta_tipo: 'numero',
       frecuencia: 'semestral',
       medio_verificacion: 'Actas de entrega de activos con registro fotográfico',
-      formula: null,
+      formula: { fuente: { formulario_id: 'frm-wayuu-105' }, operacion: 'conteo' },
       linea_base_valor: 0,
       linea_base_congelada: false,
       meta_ajustable: false,
@@ -283,12 +295,16 @@ export const tenantWayuu = {
       schema: {
         fields: [
           { name: 'full_name', label: 'Nombre Completo del Pescador', type: 'text', required: true },
+          { name: 'genero', label: 'Género', type: 'select', options: ['Masculino', 'Femenino', 'Otro'], required: true },
+          { name: 'edad', label: 'Edad', type: 'number', required: true },
           { name: 'clan', label: 'Clan Wayuu de pertenencia (ej. Pushaina, Uriana, Epinayu)', type: 'text', required: true },
           { name: 'location', label: 'Corregimiento / Comunidad de Residencia', type: 'select', options: ['Mayapo', 'El Pájaro', 'Ranchería Aledaña Mayapo', 'Ranchería Aledaña El Pájaro'], required: true },
           { name: 'association', label: 'Asociación de Pescadores a la que pertenece', type: 'select', options: ['Asociación de Mayapo A', 'Asociación de Mayapo B', 'Asociación de El Pájaro A', 'Independiente / No asociado'], required: true },
           { name: 'family_count', label: 'Miembros dependientes en el núcleo familiar', type: 'number', required: true },
           { name: 'fishing_only', label: '¿Es la pesca artesanal su única fuente de ingresos?', type: 'select', options: ['Sí, dependemos 100% de la pesca', 'No, alternamos con pastoreo/artesanías', 'No, alternamos con mototaxismo o comercio'], required: true },
           { name: 'boat_motor', label: '¿Cuenta con embarcación y motor propio en buen estado?', type: 'select', options: ['Embarcación y motor propios operativos', 'Embarcación propia pero sin motor', 'No tiene activos propios (pesca de orilla)', 'Usa activos alquilados/prestados'], required: true },
+          { name: 'experiencia_turismo', label: '¿Ha prestado servicios turísticos antes?', type: 'select', options: ['Sí, recurrentemente', 'Sí, ocasionalmente', 'No, nunca'], required: true },
+          { name: 'equipos_seguridad_actuales', label: 'Equipos de seguridad marítima con los que cuenta actualmente', type: 'checklist', options: ['Chalecos salvavidas', 'Radio de comunicación', 'GPS náutico', 'Botiquín', 'Ninguno'], required: true },
           { name: 'comments', label: 'Observaciones generales del diagnóstico', type: 'textarea', required: false }
         ]
       },
@@ -301,16 +317,89 @@ export const tenantWayuu = {
       indicator_id: 'ind-wayuu-301',
       schema: {
         fields: [
-          { name: 'agency_name', label: 'Agencia de Viajes / Operadora Turística', type: 'text', required: true },
+          { name: 'agency_name', label: 'Agencia de Viajes / Operadora Turística evaluadora', type: 'text', required: true },
           { name: 'route_evaluated', label: 'Experiencia Turística Evaluada', type: 'select', options: ['Pesca Ancestral Wayuu en Mayapo', 'Ruta de la Tortuga y Gastronomía en El Pájaro'], required: true },
-          { name: 'cultural_respect', label: 'Nivel de respeto cultural Wayuu (1 al 5)', type: 'number', required: true },
-          { name: 'safety_equipment', label: '¿Se constató el uso de chalecos salvavidas?', type: 'select', options: ['Sí, todo el equipamiento', 'Parcialmente (faltaban chalecos)', 'No contaban con seguridad'], required: true },
-          { name: 'commercial_potential', label: 'Potencial de inserción comercial B2B', type: 'select', options: ['Alto potencial', 'Medio potencial', 'Bajo potencial'], required: true },
-          { name: 'improvement_points', label: 'Recomendaciones identificadas', type: 'textarea', required: false }
+          { name: 'cultural_respect_checklist', label: 'Elementos de pertinencia cultural evidenciados', type: 'checklist', options: ['Uso del idioma Wayuunaiki en la guianza', 'Interacción directa con autoridades tradicionales', 'Inclusión de relatos y saberes ancestrales', 'Consumo de gastronomía tradicional'], required: true },
+          { name: 'safety_equipment', label: '¿Se constató el uso riguroso de equipos de seguridad?', type: 'select', options: ['Sí, se cumplieron todos los protocolos DIMAR', 'Parcialmente (faltaban elementos)', 'No contaban con seguridad adecuada'], required: true },
+          { name: 'commercial_potential', label: 'Potencial de inserción comercial (Modelo B2B)', type: 'select', options: ['Alto potencial', 'Medio potencial', 'Bajo potencial'], required: true },
+          { name: 'intencion_compra', label: '¿Estaría dispuesto a incluir esta ruta en el portafolio formal de su agencia?', type: 'select', options: ['Sí, de manera inmediata', 'Sí, si realizan ajustes técnicos/tarifarios', 'No por el momento'], required: true },
+          { name: 'improvement_points', label: 'Recomendaciones de mejora identificadas', type: 'textarea', required: false }
         ]
       },
       created_by: 'coordinacion@guajiracompetitiva.org'
     }
+  ],
+
+  // Formularios del motor moderno (RF-FRM), ampliación pedida por la 3ª
+  // revisión experta MEAL. Cada uno queda listo para vincularse a un
+  // indicador vía indicator.formula (ver docs/GUIA_FORMULARIOS_WAYUU_AMPLIADOS.md).
+  forms: [
+    // Uso exclusivo del Comité Evaluador — puntajes por criterio, suman 100%
+    // (30+20+20+15+15). Sin motor de suma ponderada (decisión explícita): el
+    // total se calcula manualmente por ahora, este formulario solo captura
+    // los 5 puntajes por separado.
+    form('frm-wayuu-103', 'FRM-103', 'Evaluación de Pitch Vivencial (Uso exclusivo Comité)', 'line-wayuu-general', [
+      campoBase('asociacion_evaluada', 'Asociación que presenta el Pitch', 'select', {
+        opciones: ['Asociación de Mayapo A', 'Asociación de Mayapo B', 'Asociación de El Pájaro A', 'Otra']
+      }),
+      campoBase('puntaje_asistencia', 'Puntaje Asistencia a Formación (Máx 30%)', 'num', { reglas_validacion: { min: 0, max: 30 } }),
+      campoBase('puntaje_viabilidad', 'Puntaje Viabilidad Técnica y Financiera (Máx 20%)', 'num', { reglas_validacion: { min: 0, max: 20 } }),
+      campoBase('puntaje_pitch', 'Puntaje Sustentación y Apropiación (Máx 20%)', 'num', { reglas_validacion: { min: 0, max: 20 } }),
+      campoBase('puntaje_innovacion_cultural', 'Puntaje Innovación y Enfoque Étnico (Máx 15%)', 'num', { reglas_validacion: { min: 0, max: 15 } }),
+      campoBase('puntaje_inclusion_diferencial', 'Puntaje Inclusión Social - Mujeres/Jóvenes (Máx 15%)', 'num', { reglas_validacion: { min: 0, max: 15 } }),
+      campoBase('comentarios_jurado', 'Justificación del Comité Evaluador', 'texto')
+    ]),
+    // Alimenta IND-1.1 (suma de numero_asistentes sobre registros validados).
+    form('frm-wayuu-104', 'FRM-104', 'Registro de Asistencia a Ciclos de Formación', 'line-wayuu-general', [
+      campoBase('fecha_capacitacion', 'Fecha de la sesión', 'fecha'),
+      campoBase('modulo_dictado', 'Módulo Temático', 'select', {
+        opciones: ['Turismo Comunitario', 'Atención al Cliente', 'Manipulación de Alimentos', 'Seguridad Marítima DIMAR', 'Gobernanza y Sostenibilidad']
+      }),
+      campoBase('entidad_formadora', 'Entidad Formadora', 'select', {
+        opciones: ['SENA', 'Cámara de Comercio de La Guajira', 'Fundación Guajira Competitiva']
+      }),
+      campoBase('numero_asistentes', 'Número total de asistentes en la sesión', 'num', { reglas_validacion: { min: 0 } }),
+      campoBase('evidencia_fotografica', 'Registro fotográfico / Planilla firmada', 'documento')
+    ]),
+    // Alimenta IND-2.1 (conteo de actas validadas).
+    form('frm-wayuu-105', 'FRM-105', 'Acta de Entrega de Activos Productivos y HSE', 'line-wayuu-general', [
+      campoBase('fecha_entrega', 'Fecha de entrega', 'fecha'),
+      campoBase('asociacion_receptora', 'Asociación Beneficiaria', 'select', {
+        opciones: ['Asociación Ganadora Mayapo', 'Asociación Ganadora El Pájaro']
+      }),
+      campoBase('tipo_activo', 'Categoría de los activos entregados', 'checklist', {
+        opciones: ['Cavas isotérmicas (Cadena de frío)', 'Chalecos salvavidas', 'Equipos GPS/Radio', 'Herramientas de manejo postcaptura']
+      }),
+      campoBase('estado_entrega', 'Estado de los equipos', 'select', {
+        opciones: ['Nuevos y funcionales', 'Requieren instalación técnica', 'Con novedades (Describir abajo)']
+      }),
+      campoBase('nombre_representante', 'Nombre del representante legal que recibe', 'texto'),
+      campoBase('firma_representante', 'Firma digital del representante que recibe', 'firma'),
+      campoBase('acta_adjunta', 'Acta firmada (PDF)', 'documento')
+    ]),
+    // Alimenta IND-4.2 (conteo de acuerdos de gobernanza validados).
+    form('frm-wayuu-106', 'FRM-106', 'Adopción de Mecanismos de Gobernanza y Sostenibilidad', 'line-wayuu-general', [
+      campoBase('asociacion', 'Organización Comunitaria', 'select', { opciones: ['Asociación Mayapo', 'Asociación El Pájaro'] }),
+      campoBase('tipo_mecanismo', 'Tipo de mecanismo adoptado', 'select', {
+        opciones: ['Fondo comunitario de ahorro', 'Reglamento interno de administración de activos', 'Plan de sostenibilidad financiera', 'Acuerdo de distribución de responsabilidades']
+      }),
+      campoBase('porcentaje_ahorro', 'Porcentaje de ingresos destinado a reinversión (si aplica)', 'num', { obligatorio: false, reglas_validacion: { min: 0, max: 100 } }),
+      campoBase('descripcion_acuerdo', 'Resumen del acuerdo alcanzado', 'texto'),
+      campoBase('documento_soporte', 'Reglamento o acta de asamblea comunitaria (PDF)', 'documento')
+    ]),
+    // Alimenta IND-4.1 (conteo de alianzas comerciales validadas).
+    form('frm-wayuu-107', 'FRM-107', 'Registro de Alianzas Comerciales B2B', 'line-wayuu-general', [
+      campoBase('fecha_firma', 'Fecha de formalización del acuerdo', 'fecha'),
+      campoBase('nombre_operador_aliado', 'Nombre de la Agencia / Operador Turístico Aliado', 'texto'),
+      campoBase('ruta_comercializada', 'Experiencia vinculada', 'select', {
+        opciones: ['Experiencia Mayapo', 'Experiencia El Pájaro', 'Ambas rutas']
+      }),
+      campoBase('tipo_acuerdo', 'Naturaleza del acuerdo comercial', 'select', {
+        opciones: ['Acuerdo de tarifas netas fijas', 'Inclusión en portafolio promocional', 'Contrato de exclusividad operativa', 'Carta de intención de compra']
+      }),
+      campoBase('responsabilidades_aliado', 'Compromisos principales del aliado', 'texto'),
+      campoBase('documento_soporte', 'Acuerdo o carta de intención (PDF)', 'documento')
+    ])
   ],
 
   feedbacks: [

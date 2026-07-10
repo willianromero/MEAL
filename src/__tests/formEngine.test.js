@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateField, validateForm, isFieldVisible, fieldLabel } from '../lib/formEngine';
+import { validateField, validateForm, isFieldVisible, fieldLabel, FIELD_TYPES } from '../lib/formEngine';
 import { shouldRemoteOverwriteLocal } from '../syncEngine';
 
 describe('Motor de formularios (formEngine)', () => {
@@ -7,6 +7,31 @@ describe('Motor de formularios (formEngine)', () => {
     const campo = { name: 'nombre', etiqueta_es: 'Nombre', tipo: 'texto', obligatorio: true };
     expect(validateField(campo, '', {})).toMatch(/obligatorio/i);
     expect(validateField(campo, 'Ana', {})).toBeNull();
+  });
+
+  it('checklist obligatorio exige al menos una opción seleccionada', () => {
+    const campo = { name: 'observables', etiqueta_es: 'Observables', tipo: 'checklist', obligatorio: true, opciones: ['A', 'B', 'C'] };
+    expect(validateField(campo, [], {})).toMatch(/obligatorio/i);
+    expect(validateField(campo, undefined, {})).toMatch(/obligatorio/i);
+    expect(validateField(campo, ['A'], {})).toBeNull();
+    expect(validateField(campo, ['A', 'C'], {})).toBeNull();
+  });
+
+  it('el tipo "documento" existe (PDF u otro archivo, distinto de "foto")', () => {
+    expect(FIELD_TYPES.documento).toBeDefined();
+    expect(FIELD_TYPES.documento.input).toBe('documento');
+  });
+
+  it('un campo documento obligatorio sin archivo falla como cualquier campo requerido', () => {
+    const campo = { name: 'acta', etiqueta_es: 'Acta adjunta', tipo: 'documento', obligatorio: true };
+    expect(validateField(campo, '', {})).toMatch(/obligatorio/i);
+    expect(validateField(campo, '[documento:acta.pdf]', {})).toBeNull();
+  });
+
+  it('checklist opcional vacío es válido, y rechaza opciones fuera de la lista', () => {
+    const campo = { name: 'observables', etiqueta_es: 'Observables', tipo: 'checklist', obligatorio: false, opciones: ['A', 'B'] };
+    expect(validateField(campo, [], {})).toBeNull();
+    expect(validateField(campo, ['Z'], {})).toMatch(/no válida/i);
   });
 
   it('Valida rangos numéricos y escala 1-5', () => {

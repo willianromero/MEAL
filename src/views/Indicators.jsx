@@ -7,12 +7,19 @@ import { CAP, can } from '../lib/roles';
 import { logAudit } from '../db';
 import { archiveRecord, restoreRecord, hardDelete, isArchived } from '../lib/configActions';
 import { generateIndicatorCode } from '../lib/codeGenerator';
+import { buildFormula, formulaToDefState } from '../lib/indicatorFormulaBuilder';
 import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, ChevronDown, ChevronUp, Eye, Plus, Lock, Snowflake, Archive, RotateCcw, Trash2, FilePen } from 'lucide-react';
 
 export default function Indicators({ currentUser }) {
   const { activeTenantId, capabilities } = useTenant();
   const isAdmin = can(capabilities, CAP.EDIT_CATALOG); // define y edita indicadores
-  const canFreeze = can(capabilities, CAP.VALIDATE) || can(capabilities, CAP.APPROVE); // congela línea base
+  // Congelar línea base: SOLO Coordinador/Administrador (CAP.VALIDATE). El
+  // Director aprueba/supervisa pero no ejecuta esta acción operativa — así
+  // coincide con el permiso real del servidor (indicators_update exige
+  // coordinador/admin_tenant). Antes también se mostraba a Director (CAP.APPROVE),
+  // lo que hacía que el cambio se viera "guardado" localmente pero el servidor
+  // lo rechazara al sincronizar (quedaba en error sin explicación).
+  const canFreeze = can(capabilities, CAP.VALIDATE);
   const canDelete = can(capabilities, CAP.DELETE_CONFIG); // borrado definitivo (solo admin)
   const isViewer = !isAdmin;                             // consulta sin editar
   const ctx = { tenantId: activeTenantId, userId: currentUser?.id, userEmail: currentUser?.email };
@@ -21,19 +28,30 @@ export default function Indicators({ currentUser }) {
   const [actionMsg, setActionMsg] = useState('');
   // Edición de la DEFINICIÓN del indicador (nombre, unidad, meta, etc.)
   const [editDefId, setEditDefId] = useState(null);
-  const [def, setDef] = useState({ name: '', unit: '', target: 0, frecuencia: 'mensual', medio_verificacion: '' });
+  const DEF_DEFAULTS = {
+    name: '', unit: '', target: 0, frecuencia: 'mensual', medio_verificacion: '',
+    // Cálculo automático (indicatorEngine.js): sin formularioId = indicador manual.
+    formularioId: '', operacion: 'conteo', campo: '', filtroCampo: '', filtroValor: ''
+  };
+  const [def, setDef] = useState(DEF_DEFAULTS);
 
   const startEditDef = (ind) => {
     setEditDefId(ind.id);
-    setDef({ name: ind.name || '', unit: ind.unit || '', target: ind.target ?? 0, frecuencia: ind.frecuencia || 'mensual', medio_verificacion: ind.medio_verificacion || '' });
+    setDef({
+      name: ind.name || '', unit: ind.unit || '', target: ind.target ?? 0,
+      frecuencia: ind.frecuencia || 'mensual', medio_verificacion: ind.medio_verificacion || '',
+      ...formulaToDefState(ind.formula)
+    });
   };
+
   const saveDef = async (ind) => {
+    const formula = buildFormula(def);
     await putWithSignature(db.indicators, {
       ...ind, name: def.name, unit: def.unit, target: Number(def.target) || 0,
-      frecuencia: def.frecuencia, medio_verificacion: def.medio_verificacion,
+      frecuencia: def.frecuencia, medio_verificacion: def.medio_verificacion, formula,
       updated_at: new Date().toISOString(), sync_status: 'pending_sync'
     });
-    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'indicators', entidadId: ind.id, despues: { name: def.name, target: def.target } });
+    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'indicators', entidadId: ind.id, despues: { name: def.name, target: def.target, formula } });
     await updatePendingCount();
     setEditDefId(null);
   };
@@ -64,6 +82,7 @@ export default function Indicators({ currentUser }) {
   const projects = useLiveQuery(byTenant(db.projects), [activeTenantId]) || [];
   const logframes = useLiveQuery(byTenant(db.logframes), [activeTenantId]) || [];
   const indicators = useLiveQuery(byTenant(db.indicators), [activeTenantId]) || [];
+  const forms = (useLiveQuery(byTenant(db.forms), [activeTenantId]) || []).filter(f => f.activo !== false);
 
   // Filtros
   const [selectedProjectId, setSelectedProjectId] = useState('all');
@@ -492,6 +511,9 @@ export default function Indicators({ currentUser }) {
                 {/* Barra de acciones de configuración (editar / archivar / eliminar) */}
                 {isAdmin && (
                   <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="badge" style={{ fontSize: '0.62rem', background: ind.formula ? 'rgba(5,150,105,0.12)' : 'rgba(234,179,8,0.12)', color: ind.formula ? '#a7f3d0' : '#fef08a' }} title={ind.formula ? 'Se calcula solo desde los registros de campo validados' : 'Requiere "Registrar Avance" manual'}>
+                      {ind.formula ? '⚙ Cálculo automático' : '✎ Manual'}
+                    </span>
                     {isArchived('indicators', ind) && <span className="badge" style={{ fontSize: '0.62rem', background: 'rgba(148,163,184,0.15)', color: '#cbd5e1' }}>Archivado</span>}
                     {!isArchived('indicators', ind) && (
                       <button onClick={() => (editDefId === ind.id ? setEditDefId(null) : startEditDef(ind))} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
@@ -527,6 +549,68 @@ export default function Indicators({ currentUser }) {
                       </select>
                     </div>
                     <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}><label>Medio de verificación</label><input value={def.medio_verificacion} onChange={e => setDef({ ...def, medio_verificacion: e.target.value })} /></div>
+
+                    {/* Cálculo automático (indicatorEngine.js): sin esto, el indicador
+                        se queda en "Manual" aunque haya un formulario con datos reales. */}
+                    <div style={{ gridColumn: '1 / -1', borderTop: '1px dashed var(--border-glass)', paddingTop: '0.75rem', marginTop: '0.25rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                      <div style={{ gridColumn: '1 / -1', fontSize: '0.78rem', fontWeight: 700, color: 'var(--primary-light)' }}>⚙ Cálculo automático (opcional)</div>
+                      <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                        <label>Fuente (formulario de captura)</label>
+                        <select value={def.formularioId} onChange={e => setDef({ ...def, formularioId: e.target.value, campo: '', filtroCampo: '' })}>
+                          <option value="">— Ninguno (indicador manual) —</option>
+                          {forms.map(f => <option key={f.id} value={f.id}>{f.codigo} · {f.nombre}</option>)}
+                        </select>
+                      </div>
+
+                      {def.formularioId && (() => {
+                        const selectedForm = forms.find(f => f.id === def.formularioId);
+                        const camposForm = selectedForm?.campos || [];
+                        const camposNumericos = camposForm.filter(c => c.tipo === 'num' || c.tipo === 'escala');
+                        return (
+                          <>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>Operación</label>
+                              <select value={def.operacion} onChange={e => setDef({ ...def, operacion: e.target.value })}>
+                                <option value="conteo">Conteo de registros</option>
+                                <option value="suma">Suma de un campo</option>
+                                <option value="promedio">Promedio de un campo</option>
+                                <option value="porcentaje">Porcentaje que cumple una condición</option>
+                              </select>
+                            </div>
+                            {def.operacion !== 'conteo' && (
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>Campo numérico</label>
+                                <select value={def.campo} onChange={e => setDef({ ...def, campo: e.target.value })}>
+                                  <option value="">-- Seleccionar --</option>
+                                  {camposNumericos.map(c => <option key={c.name} value={c.name}>{c.etiqueta_es}</option>)}
+                                </select>
+                              </div>
+                            )}
+                            {def.operacion === 'porcentaje' && (
+                              <>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label>Filtro: campo (opcional)</label>
+                                  <select value={def.filtroCampo} onChange={e => setDef({ ...def, filtroCampo: e.target.value })}>
+                                    <option value="">— Sin filtro —</option>
+                                    {camposForm.map(c => <option key={c.name} value={c.name}>{c.etiqueta_es}</option>)}
+                                  </select>
+                                </div>
+                                {def.filtroCampo && (
+                                  <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>Valor esperado</label>
+                                    <input value={def.filtroValor} onChange={e => setDef({ ...def, filtroValor: e.target.value })} placeholder="Ej. si" />
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div style={{ gridColumn: '1 / -1', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              Se calcula solo sobre registros <strong>validados</strong> de este formulario (cola de validación).
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
                     <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                       <button onClick={() => setEditDefId(null)} className="btn btn-secondary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.72rem' }}>Cancelar</button>
                       <button onClick={() => saveDef(ind)} className="btn btn-primary" style={{ padding: '0.3rem 0.7rem', fontSize: '0.72rem' }}><Save size={12} /> Guardar cambios</button>

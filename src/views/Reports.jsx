@@ -6,6 +6,7 @@ import { CAP, can } from '../lib/roles';
 import { computeIndicatorValue, semaforo, progresoPct } from '../lib/indicatorEngine';
 import { exportToCsv } from '../lib/exportCsv';
 import { SYNC_TABLES } from '../syncEngine';
+import { maskFeedback } from '../lib/pqrsPrivacy';
 import { FileBarChart, Printer, Package, DatabaseBackup, Download, Info } from 'lucide-react';
 
 // Módulo de reportes (DRT S1/RF-REP-1, S2/HU-08, RNF-12):
@@ -17,6 +18,7 @@ const SEM_LABEL = { verde: 'VERDE', amarillo: 'AMARILLO', rojo: 'ROJO' };
 export default function Reports({ currentUser }) {
   const { activeTenantId, activeTenant, capabilities } = useTenant();
   const canExport = can(capabilities, CAP.EXPORT);
+  const canSeeIdentity = can(capabilities, CAP.VIEW_PQRS_IDENTITY);
 
   const byTenant = (store) => () =>
     activeTenantId ? store.where('tenant_id').equals(activeTenantId).toArray() : Promise.resolve([]);
@@ -142,9 +144,11 @@ export default function Reports({ currentUser }) {
     const dump = { exportado: new Date().toISOString(), tenant: activeTenantId, tablas: {} };
     for (const { name, store } of SYNC_TABLES) {
       const rows = await store().toArray();
-      dump.tablas[name] = rows
+      let scoped = rows
         .filter(r => !('tenant_id' in r) || r.tenant_id === activeTenantId)
         .map(({ blob, ...rest }) => rest);
+      if (name === 'feedbacks') scoped = scoped.map(f => maskFeedback(f, canSeeIdentity));
+      dump.tablas[name] = scoped;
     }
     downloadJson(`export_total_${activeTenantId}.json`, dump);
     setMsg('Exportación total del proyecto descargada (JSON abierto).');
@@ -152,9 +156,10 @@ export default function Reports({ currentUser }) {
 
   const exportTableCsv = async (name) => {
     const entry = SYNC_TABLES.find(t => t.name === name);
-    const rows = (await entry.store().toArray())
+    let rows = (await entry.store().toArray())
       .filter(r => !('tenant_id' in r) || r.tenant_id === activeTenantId)
       .map(({ blob, ...rest }) => rest);
+    if (name === 'feedbacks') rows = rows.map(f => maskFeedback(f, canSeeIdentity));
     exportToCsv(`${name}_${activeTenantId}`, rows);
   };
 

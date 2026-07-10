@@ -6,7 +6,7 @@ import { useTenant } from '../context/TenantContext';
 import { CAP, can } from '../lib/roles';
 import { FIELD_TYPES } from '../lib/formEngine';
 import { hardDelete } from '../lib/configActions';
-import { FileCog, Plus, Save, Trash2, Power, Info } from 'lucide-react';
+import { FileCog, Plus, Save, Trash2, Power, Info, FilePen, X } from 'lucide-react';
 
 // Constructor de formularios configurables (DRT M2, HU-09): permite crear y
 // editar formularios sin recompilar la app. La app los descarga en la sync.
@@ -26,6 +26,7 @@ export default function FormBuilder({ currentUser }) {
   const forms = useLiveQuery(byTenant(db.forms), [activeTenantId]) || [];
   const lines = useLiveQuery(byTenant(db.program_lines), [activeTenantId]) || [];
 
+  const [editingId, setEditingId] = useState(null); // null = creando; id = editando ese formulario
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
   const [lineaId, setLineaId] = useState('');
@@ -33,6 +34,24 @@ export default function FormBuilder({ currentUser }) {
     { name: 'campo_1', etiqueta_es: 'Nuevo campo', tipo: 'texto', obligatorio: true, opciones: '' }
   ]);
   const [msg, setMsg] = useState('');
+
+  const resetForm = () => {
+    setEditingId(null);
+    setCodigo(''); setNombre(''); setLineaId('');
+    setCampos([{ name: 'campo_1', etiqueta_es: 'Nuevo campo', tipo: 'texto', obligatorio: true, opciones: '' }]);
+  };
+
+  const startEdit = (f) => {
+    setEditingId(f.id);
+    setCodigo(f.codigo);
+    setNombre(f.nombre);
+    setLineaId(f.linea_id || '');
+    setCampos((f.campos || []).map(c => ({
+      name: c.name, etiqueta_es: c.etiqueta_es, etiqueta_way: c.etiqueta_way || '',
+      tipo: c.tipo, obligatorio: !!c.obligatorio, opciones: (c.opciones || []).join(', ')
+    })));
+    setMsg('');
+  };
 
   if (!canEdit) {
     return (
@@ -51,7 +70,6 @@ export default function FormBuilder({ currentUser }) {
     e.preventDefault();
     if (!nombre || !codigo) return;
     const now = new Date().toISOString();
-    const id = `frm-${activeTenantId}-${Math.random().toString(36).slice(2, 7)}`;
     const processed = campos.map((c, idx) => ({
       name: (c.name || `campo_${idx + 1}`).trim().toLowerCase().replace(/\s+/g, '_'),
       etiqueta_es: c.etiqueta_es,
@@ -59,19 +77,34 @@ export default function FormBuilder({ currentUser }) {
       tipo: c.tipo,
       obligatorio: !!c.obligatorio,
       reglas_validacion: null,
-      ...(c.tipo === 'select' ? { opciones: (c.opciones || '').split(',').map(o => o.trim()).filter(Boolean) } : {})
+      ...((c.tipo === 'select' || c.tipo === 'checklist') ? { opciones: (c.opciones || '').split(',').map(o => o.trim()).filter(Boolean) } : {})
     }));
-    const form = {
-      id, tenant_id: activeTenantId, codigo, nombre, version: 1,
-      linea_id: lineaId || null, activo: true, campos: processed,
-      updated_at: now, sync_status: 'pending_sync'
-    };
-    await addWithSignature(db.forms, form);
-    await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'crear', entidad: 'forms', entidadId: id, despues: { codigo, nombre } });
+
+    if (editingId) {
+      // Edición: mismo id, se incrementa `version` (DRT 8.4). Los field_records
+      // ya capturados conservan su `formulario_version` y siguen siendo fieles
+      // a los campos que existían cuando se diligenciaron.
+      const original = forms.find(f => f.id === editingId);
+      const nuevaVersion = (original?.version || 1) + 1;
+      await putWithSignature(db.forms, {
+        ...original, codigo, nombre, linea_id: lineaId || null, campos: processed,
+        version: nuevaVersion, updated_at: now, sync_status: 'pending_sync'
+      });
+      await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'editar', entidad: 'forms', entidadId: editingId, despues: { codigo, nombre, version: nuevaVersion } });
+      setMsg(`Formulario "${nombre}" actualizado (versión ${nuevaVersion}).`);
+    } else {
+      const id = `frm-${activeTenantId}-${Math.random().toString(36).slice(2, 7)}`;
+      const form = {
+        id, tenant_id: activeTenantId, codigo, nombre, version: 1,
+        linea_id: lineaId || null, activo: true, campos: processed,
+        updated_at: now, sync_status: 'pending_sync'
+      };
+      await addWithSignature(db.forms, form);
+      await logAudit({ tenantId: activeTenantId, actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'crear', entidad: 'forms', entidadId: id, despues: { codigo, nombre } });
+      setMsg(`Formulario "${nombre}" publicado. Disponible en la captura tras la próxima sincronización de catálogos (HU-09).`);
+    }
     await updatePendingCount();
-    setMsg(`Formulario "${nombre}" publicado. Disponible en la captura tras la próxima sincronización de catálogos (HU-09).`);
-    setCodigo(''); setNombre(''); setLineaId('');
-    setCampos([{ name: 'campo_1', etiqueta_es: 'Nuevo campo', tipo: 'texto', obligatorio: true, opciones: '' }]);
+    resetForm();
   };
 
   const toggleActivo = async (f) => {
@@ -97,6 +130,7 @@ export default function FormBuilder({ currentUser }) {
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{f.codigo} · {(f.campos || []).length} campos · {f.activo !== false ? 'activo' : 'inactivo'}</div>
               </div>
               <div style={{ display: 'flex', gap: '0.3rem' }}>
+                <button onClick={() => startEdit(f)} className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem', fontSize: '0.72rem' }} title="Editar campos"><FilePen size={12} /> Editar</button>
                 <button onClick={() => toggleActivo(f)} className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem', fontSize: '0.72rem' }} title={f.activo !== false ? 'Archivar (desactivar)' : 'Restaurar (activar)'}>
                   <Power size={12} /> {f.activo !== false ? 'Archivar' : 'Restaurar'}
                 </button>
@@ -111,7 +145,12 @@ export default function FormBuilder({ currentUser }) {
 
         {/* Constructor */}
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Nuevo formulario</h3>
+          <div className="flex-between" style={{ marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>{editingId ? 'Editar formulario' : 'Nuevo formulario'}</h3>
+            {editingId && (
+              <button type="button" onClick={resetForm} className="btn btn-secondary" style={{ padding: '0.25rem 0.55rem', fontSize: '0.7rem' }}><X size={12} /> Cancelar</button>
+            )}
+          </div>
           {msg && <div className="badge badge-success" style={{ display: 'block', padding: '0.5rem', marginBottom: '0.85rem', fontSize: '0.72rem', whiteSpace: 'normal' }}>{msg}</div>}
           <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
@@ -147,7 +186,7 @@ export default function FormBuilder({ currentUser }) {
                     <label style={{ fontSize: '0.68rem', marginBottom: 0 }}>Oblig.</label>
                   </div>
                   <button type="button" onClick={() => delCampo(i)} className="btn btn-danger" style={{ padding: '0.4rem', height: '38px' }} disabled={campos.length <= 1}><Trash2 size={14} /></button>
-                  {c.tipo === 'select' && (
+                  {(c.tipo === 'select' || c.tipo === 'checklist') && (
                     <div className="form-group" style={{ gridColumn: 'span 4', marginBottom: 0 }}>
                       <label style={{ fontSize: '0.7rem' }}>Opciones (separadas por coma)</label>
                       <input value={c.opciones || ''} onChange={e => updCampo(i, 'opciones', e.target.value)} placeholder="Opción A, Opción B" />
@@ -157,7 +196,7 @@ export default function FormBuilder({ currentUser }) {
               ))}
             </div>
 
-            <button type="submit" className="btn btn-primary"><Save size={14} /> Publicar formulario</button>
+            <button type="submit" className="btn btn-primary"><Save size={14} /> {editingId ? 'Guardar cambios' : 'Publicar formulario'}</button>
           </form>
         </div>
       </div>
