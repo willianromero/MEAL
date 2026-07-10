@@ -21,19 +21,23 @@ Antes de empezar, consigue estos 3 accesos y anótalos:
 3. El archivo **`D:\MEAL\.env`** (lo crearemos/editaremos en la Parte E).
 
 Ten abierto el **Explorador de archivos de Windows** en `D:\MEAL\supabase\migrations\`.
-Verás 6 archivos:
+Verás 7 archivos:
 - `000_reset.sql`  ← solo si tu Supabase ya tenía tablas de una versión anterior
 - `001_schema.sql`
 - `002_rls.sql`
 - `003_audit_triggers.sql`
 - `004_config_edit.sql`  ← habilita editar/archivar/eliminar configuración desde la app
 - `005_tenant_suspend.sql`  ← hace que "Suspender" un proyecto bloquee de verdad el acceso
+- `006_security_hardening.sql`  ← cierra 3 brechas de permisos encontradas en auditoría general
 
 > **Nota:** si ya tenías la base montada de antes, basta con aplicar el nuevo
-> `005_tenant_suspend.sql` (SQL Editor → pegar → Run) para que "Suspender" en la
-> Consola de Proyectos bloquee de inmediato el acceso de los miembros a los
-> datos de ese proyecto (antes solo cambiaba una etiqueta visual, sin efecto
-> real). Es idempotente: se puede correr sin problema aunque ya lo hayas hecho.
+> `006_security_hardening.sql` (SQL Editor → pegar → Run). Cierra: (1) el
+> borrado definitivo de configuración, que un Coordinador podía ejecutar vía
+> API aunque la app no se lo mostrara; (2) la validación de registros de
+> campo, que no exigía rol de Coordinador/Administrador para validar el dato
+> de otra persona (solo bloqueaba auto-validarse); (3) la edición directa de
+> la fila de un proyecto en `tenants`, que un Administrador de Tenant podía
+> hacer vía API sin que ninguna pantalla se lo permitiera. Es idempotente.
 
 ---
 

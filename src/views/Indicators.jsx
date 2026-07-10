@@ -12,7 +12,13 @@ import { BarChart3, Edit, Save, CheckCircle, Info, RefreshCw, X, AlertTriangle, 
 export default function Indicators({ currentUser }) {
   const { activeTenantId, capabilities } = useTenant();
   const isAdmin = can(capabilities, CAP.EDIT_CATALOG); // define y edita indicadores
-  const canFreeze = can(capabilities, CAP.VALIDATE) || can(capabilities, CAP.APPROVE); // congela línea base
+  // Congelar línea base: SOLO Coordinador/Administrador (CAP.VALIDATE). El
+  // Director aprueba/supervisa pero no ejecuta esta acción operativa — así
+  // coincide con el permiso real del servidor (indicators_update exige
+  // coordinador/admin_tenant). Antes también se mostraba a Director (CAP.APPROVE),
+  // lo que hacía que el cambio se viera "guardado" localmente pero el servidor
+  // lo rechazara al sincronizar (quedaba en error sin explicación).
+  const canFreeze = can(capabilities, CAP.VALIDATE);
   const canDelete = can(capabilities, CAP.DELETE_CONFIG); // borrado definitivo (solo admin)
   const isViewer = !isAdmin;                             // consulta sin editar
   const ctx = { tenantId: activeTenantId, userId: currentUser?.id, userEmail: currentUser?.email };
