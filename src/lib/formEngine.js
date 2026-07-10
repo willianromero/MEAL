@@ -16,7 +16,8 @@ export const FIELD_TYPES = {
   foto: { label: 'Fotografía', input: 'foto' },
   firma: { label: 'Firma', input: 'firma' },
   bool: { label: 'Sí / No', input: 'bool' },
-  escala: { label: 'Escala 1-5', input: 'escala' }
+  escala: { label: 'Escala 1-5', input: 'escala' },
+  checklist: { label: 'Lista de chequeo (varias opciones)', input: 'checklist' }
 };
 
 // ¿Debe mostrarse el campo dado el estado actual del formulario?
@@ -31,7 +32,8 @@ export function validateField(campo, valor, datos) {
   if (!isFieldVisible(campo, datos)) return null; // los ocultos no se validan
 
   const vacio = valor === undefined || valor === null || valor === '' ||
-    (campo.tipo === 'geo' && (!valor || valor.lat == null));
+    (campo.tipo === 'geo' && (!valor || valor.lat == null)) ||
+    (campo.tipo === 'checklist' && (!Array.isArray(valor) || valor.length === 0));
 
   if (campo.obligatorio && vacio) {
     return `El campo "${campo.etiqueta_es}" es obligatorio.`;
@@ -55,6 +57,10 @@ export function validateField(campo, valor, datos) {
   }
   if (campo.tipo === 'select' && Array.isArray(campo.opciones) && !campo.opciones.includes(valor)) {
     return `"${campo.etiqueta_es}": opción no válida.`;
+  }
+  if (campo.tipo === 'checklist' && Array.isArray(campo.opciones) && campo.opciones.length > 0) {
+    const invalida = valor.find(v => !campo.opciones.includes(v));
+    if (invalida) return `"${campo.etiqueta_es}": opción "${invalida}" no válida.`;
   }
   return null;
 }

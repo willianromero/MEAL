@@ -164,6 +164,25 @@ export default function FieldCapture({ currentUser }) {
       case 'firma':
         control = <input type="text" value={val} onChange={e => setField(campo.name, e.target.value)} placeholder="Nombre de quien firma (firma digital simple)" />;
         break;
+      case 'checklist': {
+        const seleccion = Array.isArray(val) ? val : [];
+        const toggle = (opcion) => {
+          const next = seleccion.includes(opcion) ? seleccion.filter(o => o !== opcion) : [...seleccion, opcion];
+          setField(campo.name, next);
+        };
+        control = (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+            {(campo.opciones || []).map((op, i) => (
+              <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={seleccion.includes(op)} onChange={() => toggle(op)} style={{ width: 'auto' }} />
+                {op}
+              </label>
+            ))}
+            {(!campo.opciones || campo.opciones.length === 0) && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Este campo no tiene opciones configuradas.</span>}
+          </div>
+        );
+        break;
+      }
       default:
         control = <input type="text" value={val} onChange={e => setField(campo.name, e.target.value)} />;
     }

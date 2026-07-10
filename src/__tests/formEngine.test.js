@@ -9,6 +9,20 @@ describe('Motor de formularios (formEngine)', () => {
     expect(validateField(campo, 'Ana', {})).toBeNull();
   });
 
+  it('checklist obligatorio exige al menos una opción seleccionada', () => {
+    const campo = { name: 'observables', etiqueta_es: 'Observables', tipo: 'checklist', obligatorio: true, opciones: ['A', 'B', 'C'] };
+    expect(validateField(campo, [], {})).toMatch(/obligatorio/i);
+    expect(validateField(campo, undefined, {})).toMatch(/obligatorio/i);
+    expect(validateField(campo, ['A'], {})).toBeNull();
+    expect(validateField(campo, ['A', 'C'], {})).toBeNull();
+  });
+
+  it('checklist opcional vacío es válido, y rechaza opciones fuera de la lista', () => {
+    const campo = { name: 'observables', etiqueta_es: 'Observables', tipo: 'checklist', obligatorio: false, opciones: ['A', 'B'] };
+    expect(validateField(campo, [], {})).toBeNull();
+    expect(validateField(campo, ['Z'], {})).toMatch(/no válida/i);
+  });
+
   it('Valida rangos numéricos y escala 1-5', () => {
     const num = { name: 'edad', etiqueta_es: 'Edad', tipo: 'num', obligatorio: false, reglas_validacion: { min: 0, max: 120 } };
     expect(validateField(num, 200, {})).toMatch(/≤/);
