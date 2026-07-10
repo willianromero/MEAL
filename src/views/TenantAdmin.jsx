@@ -86,6 +86,14 @@ export default function TenantAdmin({ currentUser }) {
 
   const toggleEstado = async (t) => {
     const nuevo = t.estado === 'activo' ? 'suspendido' : 'activo';
+    if (nuevo === 'suspendido') {
+      const ok = confirm(
+        `¿Suspender "${t.nombre}"?\n\nSus miembros (gestores, coordinadores, etc.) perderán acceso ` +
+        `inmediato a los datos de este proyecto: no podrán ver ni capturar información hasta que lo ` +
+        `reactives. Solo el Administrador de Plataforma puede reactivarlo.`
+      );
+      if (!ok) return;
+    }
     await putWithSignature(db.tenants, { ...t, estado: nuevo, updated_at: new Date().toISOString(), sync_status: 'pending_sync' });
     await logAudit({ actorId: currentUser?.id, actorEmail: currentUser?.email, accion: 'cambio_estado_tenant', entidad: 'tenants', entidadId: t.id, antes: { estado: t.estado }, despues: { estado: nuevo } });
     await updatePendingCount();
@@ -100,7 +108,12 @@ export default function TenantAdmin({ currentUser }) {
 
       <div className="dashboard-grid" style={{ gridTemplateColumns: '2fr 1fr' }}>
         <div className="glass-panel" style={{ padding: '1.5rem', overflowX: 'auto' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Proyectos en la plataforma ({tenants.length})</h3>
+          <h3 style={{ marginBottom: '0.5rem' }}>Proyectos en la plataforma ({tenants.length})</h3>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            "Suspender" bloquea de inmediato el acceso de los miembros del proyecto a todos sus datos
+            (indicadores, registros, catálogo, PQRS…), tanto en la app como en el servidor. El proyecto
+            deja de aparecer en su selector; solo tú puedes reactivarlo.
+          </p>
           <table className="table" style={{ width: '100%', minWidth: '520px' }}>
             <thead><tr><th>Proyecto</th><th>Financiador</th><th>Unidad</th><th>Estado</th><th style={{ textAlign: 'right' }}>Acción</th></tr></thead>
             <tbody>

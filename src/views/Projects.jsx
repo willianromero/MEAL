@@ -5,6 +5,7 @@ import { updatePendingCount } from '../syncEngine';
 import { useTenant } from '../context/TenantContext';
 import { CAP, can } from '../lib/roles';
 import { archiveRecord, restoreRecord, hardDelete, isArchived } from '../lib/configActions';
+import { generateNodeCode } from '../lib/codeGenerator';
 import { Briefcase, Calendar, FolderPlus, Layers, ChevronRight, Info, Award, Target, Package, Play, Save, Plus, Archive, RotateCcw, Trash2, FilePen } from 'lucide-react';
 
 export default function Projects({ currentUser }) {
@@ -43,8 +44,9 @@ export default function Projects({ currentUser }) {
   const [endDate, setEndDate] = useState('');
 
   // Formulario nuevo nodo del marco lógico (Pilar 2)
+  // El código YA NO se captura a mano: se calcula solo (ver computedNodeCode)
+  // para eliminar el error de usuario de códigos manuales duplicados/erróneos.
   const [nodeType, setNodeType] = useState('outcome');
-  const [nodeCode, setNodeCode] = useState('');
   const [nodeDescription, setNodeDescription] = useState('');
   const [nodeParentId, setNodeParentId] = useState('');
 
@@ -140,7 +142,7 @@ export default function Projects({ currentUser }) {
   const handleAddLogframeNode = async (e) => {
     e.preventDefault();
     if (!isAdmin || !activeProject) return;
-    if (!nodeCode || !nodeDescription) return;
+    if (!computedNodeCode || !nodeDescription) return;
 
     const newId = `lf-uuid-${nodeType}-${Math.random().toString(36).substr(2, 5)}`;
     const now = new Date().toISOString();
@@ -150,7 +152,7 @@ export default function Projects({ currentUser }) {
       tenant_id: activeTenantId,
       project_id: activeProject.id,
       type: nodeType,
-      code: nodeCode,
+      code: computedNodeCode,
       parent_id: nodeType === 'impact' ? null : (nodeParentId || null),
       description: nodeDescription,
       updated_at: now,
@@ -160,8 +162,7 @@ export default function Projects({ currentUser }) {
     try {
       // Guardar con firmado criptográfico SHA-256 (Pilar 3)
       await addWithSignature(db.logframes, newNode);
-      
-      setNodeCode('');
+
       setNodeDescription('');
       setNodeParentId('');
       setShowAddNodeForm(false);
@@ -202,6 +203,22 @@ export default function Projects({ currentUser }) {
     }
     return [];
   };
+
+  // Código autogenerado del nuevo nodo (ver src/lib/codeGenerator.js). Se
+  // calcula sobre TODOS los nodos del proyecto (incluidos archivados) para
+  // nunca reutilizar un código ya asignado, aunque esté oculto.
+  const allProjectNodesIncludingArchived = activeProject
+    ? logframes.filter(lf => lf.project_id === activeProject.id)
+    : [];
+  const parentNodeForNewNode = nodeType === 'impact'
+    ? null
+    : allProjectNodesIncludingArchived.find(lf => lf.id === nodeParentId) || null;
+  const siblingsForNewNode = allProjectNodesIncludingArchived.filter(lf =>
+    lf.type === nodeType && (nodeType === 'impact' ? true : lf.parent_id === nodeParentId)
+  );
+  const computedNodeCode = (nodeType === 'impact' || nodeParentId)
+    ? generateNodeCode(nodeType, parentNodeForNewNode, siblingsForNewNode)
+    : '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -393,20 +410,20 @@ export default function Projects({ currentUser }) {
                     </div>
 
                     <div className="form-group">
-                      <label>Código Identificador</label>
-                      <input 
-                        type="text" 
-                        placeholder="Ej: R-2, P-1.2, A-2.1" 
-                        value={nodeCode}
-                        onChange={e => setNodeCode(e.target.value)}
-                        required
+                      <label>Código Identificador (automático)</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={computedNodeCode || (nodeType === 'impact' ? '' : 'Elige el padre →')}
+                        title="Generado automáticamente a partir del nivel y el componente padre"
+                        style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--primary-light)', fontWeight: 700, cursor: 'not-allowed' }}
                       />
                     </div>
 
                     {nodeType !== 'impact' && (
                       <div className="form-group" style={{ gridColumn: 'span 2' }}>
                         <label>Vincular a Componente Padre (Anidación Jerárquica)</label>
-                        <select 
+                        <select
                           value={nodeParentId}
                           onChange={e => setNodeParentId(e.target.value)}
                           required
