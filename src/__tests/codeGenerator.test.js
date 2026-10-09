@@ -38,7 +38,7 @@ describe('generateIndicatorCode — reproduce IND-{resultado}.{n}', () => {
     expect(generateIndicatorCode(r1, allNodes, [])).toBe('IND-1.1');
   });
 
-  it('segundo indicador del mismo resultado -> IND-1.2 (coincide con el seed real de Wayuu)', () => {
+  it('segundo indicador del mismo resultado -> IND-1.2', () => {
     const existentes = [{ code: 'IND-1.1' }];
     expect(generateIndicatorCode(r1, allNodes, existentes)).toBe('IND-1.2');
   });

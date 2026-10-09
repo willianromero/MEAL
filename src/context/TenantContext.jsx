@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
+import { isBackendConfigured } from '../backendClient';
 import { capabilitiesFor, isPlatformRole, normalizeRole, TENANT_ROLES } from '../lib/roles';
 
 // Contexto de tenant activo (DRT Sección 17): la sesión fija un tenant y todo
@@ -18,8 +19,9 @@ export function TenantProvider({ currentUser, children }) {
     () => localStorage.getItem(ACTIVE_TENANT_KEY) || null
   );
 
-  // Tenants existentes en la BD local
-  const allTenants = useLiveQuery(() => db.tenants.toArray(), [], []);
+  // Tenants existentes en la BD local. Un proyecto 'cerrado' salió de la
+  // plataforma: no se muestra a nadie (su historial sigue en la bitácora).
+  const allTenants = useLiveQuery(() => db.tenants.filter(t => t.estado !== 'cerrado').toArray(), [], []);
 
   // Membresías del usuario (en modo real filtran su acceso; en modo demo un
   // platform_admin ve todos los tenants sin membresía explícita).
@@ -36,8 +38,9 @@ export function TenantProvider({ currentUser, children }) {
       const ids = new Set(memberships.map(m => m.tenant_id));
       return allTenants.filter(t => ids.has(t.id));
     }
-    // Fallback demo (sin Supabase, sin membresías sembradas): acceso a todos
-    return allTenants;
+    // Solo en modo local (sin servidor) no hay membresías: acceso a todos. Con
+    // servidor, sin membresía no hay proyecto (cuenta nueva aún sin asignar).
+    return isBackendConfigured ? [] : allTenants;
   }, [allTenants, memberships]);
 
   // Tenants OPERABLES para este usuario: la plataforma ve el portafolio
@@ -82,12 +85,13 @@ export function TenantProvider({ currentUser, children }) {
     if (!activeTenantId) return null;
     const m = (memberships || []).find(x => x.tenant_id === activeTenantId && x.activo !== false);
     if (m) return m.rol;
-    // Fallback demo (sin membresías): si el rol de sesión ya es un rol de tenant
-    // válido, se usa tal cual; de lo contrario se deriva del rol de plataforma.
-    const raw = currentUser?.role;
-    if (TENANT_ROLES.includes(raw)) return raw;
+    // El Administrador de Plataforma opera cualquier proyecto como su
+    // administrador (el backend lo refleja con is_platform_admin()).
     if (isPlatform) return 'admin_tenant';
-    return normalizeRole(raw) === 'coordinador' ? 'coordinador' : 'auditor';
+    if (isBackendConfigured) return null; // sin membresía no hay rol
+    // Modo local (sin servidor): el rol de sesión, si es de tenant.
+    const raw = currentUser?.role;
+    return TENANT_ROLES.includes(raw) ? raw : 'auditor';
   }, [memberships, activeTenantId, isPlatform, currentUser?.role]);
 
   const capabilities = useMemo(

@@ -313,6 +313,11 @@ input::placeholder, textarea::placeholder {
   .mobile-topbar {
     display: flex;
   }
+
+  /* El menú de usuario va en la barra superior móvil; no se repite abajo */
+  .desktop-only {
+    display: none !important;
+  }
   
   .main-content {
     margin-left: 0;

@@ -117,8 +117,8 @@ proyectos de ejemplo.
 >
 > 1. Ábrelo con Bloc de notas, copia todo.
 > 2. SQL Editor → New query → pega → **Run**.
-> 3. Verifica en **Table Editor → tenants**: deben aparecer 3 filas
->    (Hocol, Clínica Maicao, Guardianes del Mar Wayuu).
+> 3. Verifica en **Table Editor → tenants**: debe aparecer 1 fila
+>    (Convenio Asociación Guajira — Hocol).
 
 *(Alternativa sin este paso: la app también siembra esta configuración
 localmente en cada dispositivo la primera vez que se abre, así que puedes probar
@@ -180,7 +180,7 @@ dispositivos y quede respaldada en el servidor, conviene cargar el seed SQL.)*
    ```
 3. Guarda y cierra.
 
-> Sin este archivo la app funciona en "modo demo" local. Con él, se conecta a tu
+> Sin este archivo la app arranca en "modo local" (solo desarrollo). Con él, se conecta a tu
 > base real y sincroniza.
 
 ---
@@ -211,7 +211,7 @@ Esta es la prueba que el documento rector exige aprobar (jornada offline).
 1. En un **celular Android** real, abre la app en el navegador Chrome.
 2. Menú del navegador → **"Agregar a pantalla de inicio"** (la instala como app).
 3. Inicia sesión estando con internet (para que baje catálogos y formularios).
-4. **Activa el modo avión** (o usa el botón **"Simular Offline"** de la app).
+4. **Activa el modo avión**.
 5. Durante la jornada, captura registros en **Captura Offline**: llena
    formularios, toma fotos y captura el GPS. Haz **al menos 50** a lo largo del día.
 6. Al final, **desactiva el modo avión** (recupera señal).
@@ -253,7 +253,7 @@ Cuando quieras que el equipo la use desde internet (no solo en tu PC):
 | Paso | Cómo sé que quedó bien |
 |---|---|
 | B (migraciones) | En Table Editor aparecen las tablas y el bucket `evidencias` |
-| C (seed) | En `tenants` hay 3 filas |
+| C (seed) | En `tenants` hay 1 fila (Hocol) |
 | D (usuario) | El SQL dice "Success" |
 | E (.env) | El archivo tiene las 2 líneas con tus llaves |
 | F (prueba) | Entras, ves Hocol y sincroniza (fecha, no "Nunca") |

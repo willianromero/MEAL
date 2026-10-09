@@ -3,6 +3,24 @@
 Guía operativa por rol (los nombres de rol pueden variar por proyecto: cada
 tenant los configura; aquí se usan los del convenio Hocol como referencia).
 
+## Ingresar y salir
+
+- **Ingresar:** abre https://mealguajira.netlify.app, escribe tu correo y tu
+  contraseña y pulsa **Ingresar**. La primera vez en un dispositivo la app
+  descarga tu proyecto (hazlo con señal); después funciona sin conexión.
+- **Primera vez:** pulsa **¿Primera vez? Crear cuenta**. Tu cuenta queda sin
+  acceso hasta que el administrador te asigne el proyecto y tu rol.
+- **¿Olvidaste tu contraseña?** En la pantalla de ingreso pulsa ese enlace y
+  escribe tu correo: te llega un enlace para crear una nueva (revisa el spam).
+- **Mi cuenta:** tu correo y tu rol, y **Cambiar contraseña**. Está en el menú
+  de tu usuario (arriba a la derecha; en el celular, el círculo con tu inicial)
+  y al pie de la barra lateral.
+- **Cerrar sesión:** menú de tu usuario → **Cerrar sesión** (o el botón
+  **Salir** al pie de la barra lateral). Si quedaron cambios sin enviar, la app
+  te avisa: no se pierden, se envían cuando vuelvas a ingresar con señal.
+- **Sin señal:** si abres la app sin conexión sigues con tu sesión y puedes
+  trabajar; todo se envía solo al recuperar la señal.
+
 ## Conceptos básicos
 
 - **Proyecto (tenant):** cada convenio es un espacio aislado con sus comunidades,

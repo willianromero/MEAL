@@ -97,10 +97,27 @@ export async function changePassword({ currentPassword, newPassword }) {
   if (error) throw new Error(friendlyAuthError(error));
 }
 
+// Restablecer contraseña olvidada (Neon Auth): se envía un correo con un enlace
+// que vuelve a la app como /?restablecer=1&token=… ; ahí se pide la nueva.
+export const PASSWORD_RESET_PARAM = 'restablecer';
+
+export async function requestPasswordReset(email) {
+  const redirectTo = `${window.location.origin}/?${PASSWORD_RESET_PARAM}=1`;
+  const { error } = await backend.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw new Error(friendlyAuthError(error));
+}
+
+export async function completePasswordReset({ token, newPassword }) {
+  if (backendKind !== 'neon') throw new Error('Restablecer la contraseña desde la app requiere el servidor Neon.');
+  const { error } = await backend.auth.getBetterAuthInstance().resetPassword({ token, newPassword });
+  if (error) throw new Error(friendlyAuthError(error));
+}
+
 // Los servicios de autenticación responden en inglés; se traducen los casos
 // que un usuario de campo realmente ve.
 export function friendlyAuthError(error) {
   const msg = (error && (error.message || error.code)) || String(error || '');
+  if (/INVALID_TOKEN|invalid token/i.test(msg)) return 'El enlace para restablecer la contraseña venció o ya se usó. Pide uno nuevo.';
   if (/invalid (email or password|login credentials)|INVALID_EMAIL_OR_PASSWORD/i.test(msg)) return 'Correo o contraseña incorrectos.';
   if (/INVALID_PASSWORD|invalid password/i.test(msg)) return 'La contraseña actual no es correcta.';
   if (/already exists|already registered|USER_ALREADY_EXISTS/i.test(msg)) return 'Ya existe una cuenta con ese correo. Inicia sesión.';

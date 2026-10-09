@@ -1,5 +1,9 @@
 # Guía paso a paso — Cargar indicadores nuevos (ejemplo real)
 
+> **Nota (oct-2026):** el proyecto del ejemplo (Guardianes del Mar Wayuu) ya no
+> está en la plataforma, que hoy opera solo el **Convenio Hocol**. Los pasos son
+> los mismos para cualquier proyecto: elige Hocol en el Paso 0.
+
 Esta guía usa como ejemplo un ajuste real recomendado por un experto MEAL para el
 proyecto **Guardianes del Mar Wayuu**: tres indicadores faltantes de los
 Resultados R-3 y R-4. Sirve como plantilla para cualquier carga futura de

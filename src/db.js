@@ -143,9 +143,10 @@ export async function logAudit({ tenantId, actorId, actorEmail, accion, entidad,
 // Cambiar este valor borra UNA sola vez, en cada dispositivo, todo lo guardado
 // localmente (incluido lo pendiente de sincronizar) y se vuelve a sembrar la
 // configuración. Solo debe cambiarse cuando todo lo capturado antes es
-// descartable. 2026-10: arranque limpio en Neon; lo capturado contra el
-// Supabase de desarrollo era de prueba y no debe subirse a producción.
-export const LOCAL_DATA_EPOCH = '2026-10-neon';
+// descartable. 2026-10: arranque limpio en Neon con un único proyecto (Hocol);
+// lo capturado contra el Supabase de desarrollo era de prueba, y los
+// proyectos de ejemplo (Wayuu, Maicao) se retiraron de la plataforma.
+export const LOCAL_DATA_EPOCH = '2026-10-solo-hocol';
 
 export async function resetLocalDataIfNewEpoch() {
   // Una sola transacción sobre todas las tablas: si la app arranca dos veces
