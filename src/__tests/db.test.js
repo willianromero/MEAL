@@ -69,14 +69,11 @@ describe('Base de datos local multi-tenant (Dexie v2 mock)', () => {
     expect(db.consents).toBeDefined();
   });
 
-  it('Debería sembrar los 3 tenants de configuración cuando la BD está vacía', async () => {
+  it('Debería sembrar únicamente el convenio Hocol cuando la BD está vacía', async () => {
     await seedLocalData();
 
-    // Los 3 tenants del plan: Wayuu, Maicao y Hocol
-    expect(db.tenants._rows.has('ten-wayuu')).toBe(true);
-    expect(db.tenants._rows.has('ten-maicao')).toBe(true);
     expect(db.tenants._rows.has('ten-hocol')).toBe(true);
-    expect(db.tenants._rows.size).toBe(3);
+    expect(db.tenants._rows.size).toBe(1);
   });
 
   it('Debería etiquetar cada dato con su tenant_id (aislamiento M0)', async () => {
@@ -109,20 +106,22 @@ describe('Base de datos local multi-tenant (Dexie v2 mock)', () => {
 
   it('Debería firmar los registros sembrados con SHA-256 (integridad)', async () => {
     await seedLocalData();
-    const tenant = db.tenants._rows.get('ten-wayuu');
+    const tenant = db.tenants._rows.get('ten-hocol');
     expect(tenant.signature).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('Borra UNA vez los datos locales de una época anterior (datos de prueba) y re-siembra', async () => {
     await db.sync_meta.put({ key: 'data_epoch', value: 'epoca-vieja' });
     await db.field_records.put({ id: 'fr-prueba', tenant_id: 'ten-hocol', sync_status: 'error' });
-    await db.feedbacks.put({ id: 'fb-prueba', tenant_id: 'ten-wayuu', sync_status: 'synced' });
+    await db.feedbacks.put({ id: 'fb-prueba', tenant_id: 'ten-hocol', sync_status: 'synced' });
+    await db.tenants.put({ id: 'ten-wayuu', nombre: 'Proyecto retirado', sync_status: 'synced' });
 
     await seedLocalData();
 
     expect(db.field_records._rows.has('fr-prueba')).toBe(false);
     expect(db.feedbacks._rows.size).toBe(0);
-    expect(db.tenants._rows.size).toBe(3);
+    expect(db.tenants._rows.has('ten-wayuu')).toBe(false); // proyectos retirados también se van
+    expect(db.tenants._rows.size).toBe(1);
     expect(db.sync_meta._rows.get('data_epoch').value).toBe(LOCAL_DATA_EPOCH);
   });
 

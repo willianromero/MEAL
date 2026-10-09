@@ -21,7 +21,7 @@ const USERS = {
   admin: '11111111-1111-4111-8111-111111111111',   // platform_admin
   gestorHocol: '22222222-2222-4222-8222-222222222222',
   coordHocol: '33333333-3333-4333-8333-333333333333',
-  gestorWayuu: '44444444-4444-4444-8444-444444444444',
+  gestorOtro: '44444444-4444-4444-8444-444444444444',
   intruso: '55555555-5555-4555-8555-555555555555'    // se registró solo, sin membresía
 };
 
@@ -73,18 +73,27 @@ describe('Neon: instalacion_neon.sql sobre PostgreSQL real', () => {
       ('${USERS.admin}', 'admin@fundacionguajiracompetitiva.org'),
       ('${USERS.gestorHocol}', 'gestor.hocol@ejemplo.org'),
       ('${USERS.coordHocol}', 'coord.hocol@ejemplo.org'),
-      ('${USERS.gestorWayuu}', 'gestor.wayuu@ejemplo.org'),
+      ('${USERS.gestorOtro}', 'gestor.otro@ejemplo.org'),
       ('${USERS.intruso}', 'intruso@ejemplo.org');`);
 
     // --- El usuario pega el script en el SQL Editor (dueño de la base) ---
     await asOwner(() => pg.exec(buildNeonSql()));
+
+    // Producción tiene un único proyecto (Hocol); para demostrar el aislamiento
+    // se agrega aquí un segundo tenant mínimo, solo en esta base de prueba.
+    await asOwner(() => pg.exec(`
+      insert into public.tenants (id, nombre) values ('ten-prueba', 'Proyecto de prueba');
+      insert into public.program_lines (id, tenant_id, codigo, nombre) values ('line-prueba-1', 'ten-prueba', 'LP', 'Línea de prueba');
+      insert into public.units (id, tenant_id, nombre) values ('unit-prueba-1', 'ten-prueba', 'U1'), ('unit-prueba-2', 'ten-prueba', 'U2');
+      insert into public.forms (id, tenant_id, codigo, nombre) values ('frm-prueba-1', 'ten-prueba', 'F-P1', 'Formulario de prueba');
+    `));
 
     // --- Alta de usuarios por correo, como indica la guía ---
     await asOwner(() => pg.exec(`
       select public.meal_asignar_usuario('admin@fundacionguajiracompetitiva.org', 'ten-hocol', 'admin_tenant', 'platform_admin');
       select public.meal_asignar_usuario('GESTOR.HOCOL@ejemplo.org', 'ten-hocol', 'gestor');
       select public.meal_asignar_usuario('coord.hocol@ejemplo.org', 'ten-hocol', 'coordinador');
-      select public.meal_asignar_usuario('gestor.wayuu@ejemplo.org', 'ten-wayuu', 'gestor');
+      select public.meal_asignar_usuario('gestor.otro@ejemplo.org', 'ten-prueba', 'gestor');
     `));
   }, 120000);
 
@@ -95,24 +104,29 @@ describe('Neon: instalacion_neon.sql sobre PostgreSQL real', () => {
 
   it('es idempotente: se puede volver a ejecutar completo sin error', async () => {
     await asOwner(() => pg.exec(buildNeonSql()));
-    const [{ n }] = await rows('select count(*)::int n from public.tenants');
-    expect(n).toBe(3);
+    const [{ n }] = await rows(`select count(*)::int n from public.tenants where id = 'ten-hocol'`);
+    expect(n).toBe(1);
   });
 
-  it('siembra los 3 tenants y la configuración de Hocol (Anexo E)', async () => {
-    const t = await rows('select id from public.tenants order by id');
-    expect(t.map((r) => r.id)).toEqual(['ten-hocol', 'ten-maicao', 'ten-wayuu']);
-    const [{ n }] = await rows(`select count(*)::int n from public.units where tenant_id = 'ten-hocol'`);
-    expect(n).toBe(36);
+  it('siembra solo el convenio Hocol (Anexo E), sin datos operativos', async () => {
+    const seeded = await rows(`select id from public.tenants where id <> 'ten-prueba' order by id`);
+    expect(seeded.map((r) => r.id)).toEqual(['ten-hocol']);
+    const [c] = await rows(`select
+      (select count(*)::int from public.units where tenant_id = 'ten-hocol') units,
+      (select count(*)::int from public.indicators where tenant_id = 'ten-hocol') indicators,
+      (select count(*)::int from public.forms where tenant_id = 'ten-hocol') forms,
+      (select count(*)::int from public.feedbacks) pqrs,
+      (select count(*)::int from public.lessons_learned) lecciones`);
+    expect(c).toEqual({ units: 36, indicators: 44, forms: 9, pqrs: 0, lecciones: 0 });
   });
 
   it('cada usuario ve SOLO los tenants de los que es miembro', async () => {
     const hocol = await asUser(USERS.gestorHocol, () => rows('select id from public.tenants'));
     expect(hocol.map((r) => r.id)).toEqual(['ten-hocol']);
-    const wayuu = await asUser(USERS.gestorWayuu, () => rows('select tenant_id from public.units'));
-    expect(new Set(wayuu.map((r) => r.tenant_id))).toEqual(new Set(['ten-wayuu']));
+    const otro = await asUser(USERS.gestorOtro, () => rows('select tenant_id from public.units'));
+    expect(new Set(otro.map((r) => r.tenant_id))).toEqual(new Set(['ten-prueba']));
     const admin = await asUser(USERS.admin, () => rows('select id from public.tenants'));
-    expect(admin).toHaveLength(3);
+    expect(admin).toHaveLength(2);
   });
 
   it('una cuenta registrada por su cuenta no ve nada y no puede auto-promoverse (007)', async () => {
@@ -146,7 +160,7 @@ describe('Neon: instalacion_neon.sql sobre PostgreSQL real', () => {
        values ($1, $2, $3, $4, '{"x":1}'::jsonb, now())`, [id, tenant, form, sub]));
 
     await insert(USERS.gestorHocol, 'ten-hocol', 'fr-1');
-    await expect(insert(USERS.gestorWayuu, 'ten-hocol', 'fr-2')).rejects.toThrow(/row-level security/);
+    await expect(insert(USERS.gestorOtro, 'ten-hocol', 'fr-2')).rejects.toThrow(/row-level security/);
 
     const audit = await asUser(USERS.gestorHocol, () =>
       rows(`select accion, actor_id from public.audit_log where entidad = 'field_records' and entidad_id = 'fr-1'`));
@@ -163,12 +177,12 @@ describe('Neon: instalacion_neon.sql sobre PostgreSQL real', () => {
   });
 
   it('suspender un tenant corta el acceso de sus miembros (005)', async () => {
-    await asUser(USERS.admin, () => rows(`update public.tenants set estado = 'suspendido' where id = 'ten-wayuu'`));
-    const units = await asUser(USERS.gestorWayuu, () => rows('select id from public.units'));
+    await asUser(USERS.admin, () => rows(`update public.tenants set estado = 'suspendido' where id = 'ten-prueba'`));
+    const units = await asUser(USERS.gestorOtro, () => rows('select id from public.units'));
     expect(units).toHaveLength(0);
-    const tenants = await asUser(USERS.gestorWayuu, () => rows('select id, estado from public.tenants'));
-    expect(tenants).toEqual([{ id: 'ten-wayuu', estado: 'suspendido' }]); // sigue viendo que existe
-    await asUser(USERS.admin, () => rows(`update public.tenants set estado = 'activo' where id = 'ten-wayuu'`));
+    const tenants = await asUser(USERS.gestorOtro, () => rows('select id, estado from public.tenants'));
+    expect(tenants).toEqual([{ id: 'ten-prueba', estado: 'suspendido' }]); // sigue viendo que existe
+    await asUser(USERS.admin, () => rows(`update public.tenants set estado = 'activo' where id = 'ten-prueba'`));
   });
 
   it('la regla de evidencias que usa la función de Netlify responde por tenant', async () => {
@@ -176,7 +190,7 @@ describe('Neon: instalacion_neon.sql sobre PostgreSQL real', () => {
     const can = (sub, t) => asUser(sub, () =>
       rows('select public.has_tenant_role($1, $2) ok', [t, roles])).then((r) => r[0].ok);
     expect(await can(USERS.gestorHocol, 'ten-hocol')).toBe(true);
-    expect(await can(USERS.gestorHocol, 'ten-wayuu')).toBe(false);
+    expect(await can(USERS.gestorHocol, 'ten-prueba')).toBe(false);
     expect(await can(USERS.intruso, 'ten-hocol')).toBe(false);
   });
 });

@@ -98,6 +98,7 @@ export function roleLabel(role, tenantConfig) {
   const defaults = {
     platform_admin: 'Administrador de Plataforma',
     platform_direccion: 'Dirección de la Fundación',
+    user: 'Usuario',
     gestor: 'Gestor de Campo',
     coordinador: 'Coordinador',
     director: 'Director del Proyecto',

@@ -12,7 +12,8 @@ export default function TenantAdmin({ currentUser }) {
   const { capabilities, setActiveTenant } = useTenant();
   const canManage = can(capabilities, CAP.MANAGE_TENANTS);
 
-  const tenants = useLiveQuery(() => db.tenants.toArray(), [], []) || [];
+  // Los proyectos 'cerrados' ya no forman parte de la plataforma.
+  const tenants = useLiveQuery(() => db.tenants.filter(t => t.estado !== 'cerrado').toArray(), [], []) || [];
 
   const [nombre, setNombre] = useState('');
   const [financiador, setFinanciador] = useState('');

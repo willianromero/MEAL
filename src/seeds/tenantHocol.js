@@ -1,6 +1,6 @@
 import { DEFAULT_PQRS_LEVELS } from './defaults.js';
 
-// Tenant 3: Convenio Asociación Guajira (Ecopetrol–Hocol) 2026.
+// Convenio Asociación Guajira (Ecopetrol–Hocol) 2026: el proyecto de la plataforma.
 // Configuración según el Anexo E del DRT v2.0: TODO lo específico del convenio
 // vive aquí como datos, no como lógica de la plataforma.
 const TENANT_ID = 'ten-hocol';

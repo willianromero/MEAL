@@ -56,7 +56,7 @@ describe('netlify/functions/evidencias', () => {
   });
 
   it('rechaza subir a un tenant ajeno, sin sesión o con JWT inválido', async () => {
-    mockDataApi({ has_tenant_role: ['ten-wayuu'] });
+    mockDataApi({ has_tenant_role: ['ten-otro'] });
     expect((await handler(request('POST', { body: new Uint8Array([1]) }))).status).toBe(403);
     expect((await handler(request('POST', { body: new Uint8Array([1]), token: null }))).status).toBe(401);
     expect((await handler(request('POST', { body: new Uint8Array([1]), token: 'jwt-falso' }))).status).toBe(403);
@@ -86,7 +86,7 @@ describe('netlify/functions/evidencias', () => {
     expect(ok.status).toBe(200);
     expect(new Uint8Array(await ok.arrayBuffer())).toEqual(new Uint8Array([7, 7]));
 
-    mockDataApi({ is_member_of: ['ten-wayuu'] });
+    mockDataApi({ is_member_of: ['ten-otro'] });
     expect((await handler(request('GET'))).status).toBe(403);
   });
 

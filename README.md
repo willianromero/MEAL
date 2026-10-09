@@ -35,7 +35,7 @@ src/
     crypto.js           AES-GCM para datos personales (Habeas Data) + hash de documento
     evidence.js         Compresión de fotos + hash de integridad, subida diferida
     exportCsv.js        Exportación CSV abierta de cualquier tabla
-  seeds/                Configuración por tenant (Wayuu, Maicao, Hocol = Anexo E)
+  seeds/                Configuración del convenio Hocol (Anexo E): el único proyecto de la plataforma
   views/                Dashboard (6 vistas 10.1), FieldCapture, Validation, FormBuilder,
                         Beneficiaries, Feedback (PQRS/SLA), Repository, AuditLog,
                         Reports, Catalog, TenantAdmin, Users, Projects, Indicators…
@@ -48,7 +48,7 @@ docs/                   Manual de usuario por rol
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 (modo demo local sin backend)
+npm run dev        # http://localhost:5173 (sin variables de servidor: modo local de desarrollo)
 npm test           # vitest — incluye el gate de aislamiento multi-tenant
 npm run build      # PWA de producción en dist/
 ```
@@ -65,8 +65,8 @@ VITE_SUPABASE_URL=https://<tu-instancia>
 VITE_SUPABASE_ANON_KEY=<anon-key>
 ```
 
-Sin estas variables la app opera en **modo demo local** (sembrado de los 3 tenants
-y simulador de roles en la pantalla de acceso).
+Sin estas variables la app arranca en **modo local** (solo desarrollo: sin cuentas
+ni sincronización, con la configuración de Hocol sembrada).
 
 ## Backend en Neon (producción actual)
 
@@ -89,13 +89,12 @@ Netlify Blobs con la misma regla por tenant que el bucket de Supabase).
 ## Gates de aceptación (DRT 13.2 — si fallan, el sistema no se acepta)
 
 1. **Aislamiento multi-tenant (13.2-2):** `npm test` ejecuta
-   `src/__tests/tenantIsolation.test.js` — 3 tenants sembrados, cero fugas entre
+   `src/__tests/tenantIsolation.test.js` — Hocol más un tenant de prueba, cero fugas entre
    tenants, manipulación de identificadores sin efecto, y verificación de que las
    migraciones fuerzan RLS en todas las tablas. En despliegue, repetir la batería
    contra PostgreSQL real con dos usuarios de tenants distintos.
 2. **Jornada offline (13.2-1):** procedimiento UAT en dispositivo real —
-   ≥50 registros con fotos durante 8h sin señal (usar el botón *Simular Offline*
-   para ensayos); al reconectar, el 100% concilia sin duplicados (idempotencia
+   ≥50 registros con fotos durante 8h sin señal (en *modo avión*); al reconectar, el 100% concilia sin duplicados (idempotencia
    por UUID) ni pérdidas. La cola muestra estado por registro: local / en cola /
    sincronizado / error (RF-OFF-6).
 

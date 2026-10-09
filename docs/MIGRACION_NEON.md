@@ -38,14 +38,14 @@ de la Fundación:
 | URL de Neon Auth | `https://ep-aged-fog-b6lfibr6.neonauth.c-2.sa-east-1.aws.neon.tech/neondb/auth` |
 | URL de la Data API | `https://ep-aged-fog-b6lfibr6.apirest.c-2.sa-east-1.aws.neon.tech/neondb/rest/v1` |
 | Dominios de confianza (Auth) | `https://mealguajira.netlify.app`, `http://localhost:5173` |
-| Base de datos | `instalacion_neon.sql` aplicado y verificado (huella md5 idéntica a la prueba local): 3 proyectos, 39 comunidades, 52 indicadores, 14 formularios, 62 políticas RLS; **0 datos operativos** |
+| Base de datos | `instalacion_neon.sql` aplicado y verificado (huella md5 idéntica a la prueba local). Un solo proyecto activo: **Convenio Hocol** (36 comunidades, 44 indicadores, 9 formularios); 62 políticas RLS; **0 datos operativos**. Los proyectos de ejemplo Wayuu y Maicao quedaron **cerrados** (sin configuración, ocultos en la app; su historial sigue en la bitácora). Respaldo previo a esa limpieza: rama `respaldo-antes-de-solo-hocol`. |
 | Netlify | variables `VITE_NEON_AUTH_URL` y `VITE_NEON_DATA_API_URL` creadas; el sitio publica desde GitHub (`main`) |
 
 Los datos que había en Supabase eran de prueba y **no se migraron** (el Paso 0
 no aplica). Los dispositivos que usaron la versión anterior borran su copia
 local de prueba una sola vez al abrir la nueva versión.
 
-**Falta solo el Paso 5** (crear cuentas y asignar roles) y la prueba del Paso 6.
+Cuenta de administrador creada: `admin@fundacionguajiracompetitiva.org` (Administrador de Plataforma + Administrador del proyecto Hocol). Para el resto del equipo, sigue el **Paso 5**.
 
 ---
 
@@ -108,8 +108,8 @@ del Paso 3.**
 4. **Resultado esperado:** termina sin errores en rojo.
    - Si dice *"Falta el rol authenticated"* o *"Falta la función
      auth.user_id()"*: no hiciste el Paso 2. Hazlo y vuelve a correr el archivo.
-5. Comprueba: menú izquierdo → **Tables** → `tenants` debe tener **3 filas**
-   (Hocol, Clínica Maicao, Guardianes del Mar Wayuu) y `units` muchas filas.
+5. Comprueba: menú izquierdo → **Tables** → `tenants` debe tener **1 fila**
+   (Convenio Asociación Guajira — Hocol) y `units` 36 filas.
 
 El archivo se puede volver a ejecutar sin problema: no borra ni duplica nada.
 
@@ -150,7 +150,7 @@ arrastrando la carpeta `dist`).
 ### 5.1 — Cada persona crea su cuenta
 1. Abre https://mealguajira.netlify.app (con `Ctrl+F5` para que tome la
    versión nueva).
-2. En el Portal de Acceso: **¿Primera vez? Crear cuenta** → correo y
+2. En la pantalla de ingreso: **¿Primera vez? Crear cuenta** → correo y
    contraseña (mínimo 8 caracteres) → **Crear Cuenta**.
 3. La cuenta queda **sin acceso a nada** hasta el paso 5.2. Es intencional:
    aunque alguien desconocido se registre, no ve ningún dato.
@@ -164,10 +164,10 @@ select public.meal_asignar_usuario('admin@fundacionguajiracompetitiva.org', 'ten
 
 -- Ejemplos para el equipo:
 select public.meal_asignar_usuario('gestor@ejemplo.org', 'ten-hocol', 'gestor');
-select public.meal_asignar_usuario('coordinadora@ejemplo.org', 'ten-wayuu', 'coordinador');
+select public.meal_asignar_usuario('coordinadora@ejemplo.org', 'ten-hocol', 'coordinador');
 ```
 
-- Proyectos: `ten-hocol`, `ten-wayuu`, `ten-maicao`.
+- Proyecto: `ten-hocol` (el único de la plataforma).
 - Roles dentro del proyecto: `gestor`, `coordinador`, `director`, `admin_fin`,
   `admin_tenant`, `financiador`, `auditor`.
 - Para dar acceso a otro proyecto, repite la línea con el otro `ten-…`.
@@ -217,7 +217,7 @@ solo si restauraste Supabase en el Paso 0).
 
 - `src/backendClient.js` elige el backend por variables de entorno: Neon
   (`VITE_NEON_AUTH_URL` + `VITE_NEON_DATA_API_URL`) → Supabase
-  (`VITE_SUPABASE_*`) → modo demo. El resto de la app usa la misma API
+  (`VITE_SUPABASE_*`) → modo local de desarrollo. El resto de la app usa la misma API
   (`backend.auth.*`, `backend.from()`), vía `@neondatabase/neon-js` con
   `SupabaseAuthAdapter`.
 - `neon/instalacion_neon.sql` se **genera** con `npm run gen:neon` a partir de

@@ -23,6 +23,7 @@ vi.mock('dexie', () => {
 
 import { seedTenantConfig } from '../seeds/seedEngine';
 import { TENANT_SEEDS } from '../seeds/index';
+import { tenantPrueba } from './fixtures/tenantPrueba';
 
 // BD en memoria con la misma semántica de scoping que usa la app:
 // where('tenant_id').equals(x).toArray()
@@ -54,13 +55,15 @@ const TABLES = [
 const memDb = Object.fromEntries(TABLES.map(t => [t, makeStore()]));
 
 beforeAll(async () => {
-  for (const cfg of TENANT_SEEDS) {
+  // La app siembra solo Hocol; se agrega un tenant de prueba para poder
+  // demostrar el aislamiento entre dos proyectos.
+  for (const cfg of [...TENANT_SEEDS, tenantPrueba]) {
     await seedTenantConfig(memDb, cfg);
   }
 });
 
 describe('GATE 13.2-2 — Aislamiento multi-tenant (cero fugas)', () => {
-  const TENANT_IDS = ['ten-wayuu', 'ten-maicao', 'ten-hocol'];
+  const TENANT_IDS = ['ten-hocol', 'ten-prueba'];
 
   it('Existen múltiples tenants con datos (precondición del gate)', async () => {
     const tenants = await memDb.tenants.toArray();
@@ -103,7 +106,7 @@ describe('GATE 13.2-2 — Aislamiento multi-tenant (cero fugas)', () => {
       if (ind.linea_id) expect(hocolLines.has(ind.linea_id), `Indicador ${ind.code} referencia línea ajena`).toBe(true);
     }
     // Y ninguna línea de Hocol aparece referenciada por indicadores de otros tenants
-    for (const tid of ['ten-wayuu', 'ten-maicao']) {
+    for (const tid of ['ten-prueba']) {
       const inds = await memDb.indicators.where('tenant_id').equals(tid).toArray();
       for (const ind of inds) {
         if (ind.linea_id) expect(hocolLines.has(ind.linea_id)).toBe(false);

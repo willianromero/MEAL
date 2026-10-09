@@ -2,11 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   subscribeToSyncState, 
   triggerSync, 
-  setSimulatedOffline,
   p2pSyncManager
 } from '../syncEngine';
 import { 
-  Wifi, 
   WifiOff, 
   RotateCw, 
   CloudLightning, 
@@ -69,11 +67,6 @@ export default function SyncIndicator() {
     if (sync.isOnline && !sync.isSyncing) {
       triggerSync();
     }
-  };
-
-  const toggleSimulation = () => {
-    const nextVal = !sync.isSimulatedOffline;
-    setSimulatedOffline(nextVal);
   };
 
   // --- CONTROLADORES WEBRTC P2P ---
@@ -143,7 +136,7 @@ export default function SyncIndicator() {
     badgeClass = 'badge-warning';
     statusIcon = <RotateCw size={16} className="animate-spin" />;
   } else if (!sync.isOnline) {
-    statusText = sync.isSimulatedOffline ? 'Offline (Simulado)' : 'Desconectado';
+    statusText = 'Sin conexión';
     badgeClass = 'badge-warning';
     statusIcon = <WifiOff size={16} />;
   } else if (sync.errorCount > 0) {
@@ -205,22 +198,6 @@ export default function SyncIndicator() {
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: showP2PPanel ? 'var(--primary-light)' : 'var(--text-primary)' }}>
               <Users size={14} /> Sincro P2P Offline
             </span>
-          </button>
-
-          <button 
-            onClick={toggleSimulation}
-            className="btn btn-secondary"
-            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-          >
-            {sync.isSimulatedOffline ? (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary-light)' }}>
-                <Wifi size={14} /> Reconectar
-              </span>
-            ) : (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: '#f97316' }}>
-                <WifiOff size={14} /> Simular Offline
-              </span>
-            )}
           </button>
 
           <button
