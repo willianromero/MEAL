@@ -1,5 +1,5 @@
 import React from 'react';
-import { isSupabaseConfigured } from '../supabaseClient';
+import { isBackendConfigured } from '../backendClient';
 import { useTenant } from '../context/TenantContext';
 import { CAP, can, roleLabel } from '../lib/roles';
 import {
@@ -174,8 +174,8 @@ export default function Sidebar({ currentView, setCurrentView, currentUser, isMo
           </span>
         </div>
         
-        {/* Botón de simulación rápido oculto en producción (Supabase real conectado) */}
-        {!isSupabaseConfigured && (
+        {/* Botón de simulación rápido oculto en producción (servidor real conectado) */}
+        {!isBackendConfigured && (
           <button
             onClick={() => {
               setCurrentView('auth');

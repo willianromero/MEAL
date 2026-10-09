@@ -7,9 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "gen:neon": "node scripts/genNeonSql.mjs"
   },
   "dependencies": {
+    "@neondatabase/neon-js": "0.7.0-beta",
+    "@netlify/blobs": "^11.1.4",
     "@supabase/supabase-js": "^2.110.0",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
@@ -19,6 +23,8 @@
     "recharts": "^3.9.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-postgis": "^0.2.8",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",

@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-// --- Mocks de db (Dexie) y supabase, para probar los helpers en aislamiento ---
+// --- Mocks de db (Dexie) y del backend, para probar los helpers en aislamiento ---
 const auditRows = [];
 
 vi.mock('../db', () => {
@@ -20,9 +20,9 @@ vi.mock('../db', () => {
 globalThis.__auditRows = auditRows;
 
 const supabaseDelete = vi.fn(async () => ({ error: null }));
-vi.mock('../supabaseClient', () => ({
-  isSupabaseConfigured: true,
-  supabase: { from: () => ({ delete: () => ({ eq: supabaseDelete }) }) }
+vi.mock('../backendClient', () => ({
+  isBackendConfigured: true,
+  backend: { from: () => ({ delete: () => ({ eq: supabaseDelete }) }) }
 }));
 
 vi.mock('../syncEngine', () => ({ updatePendingCount: vi.fn(async () => {}) }));

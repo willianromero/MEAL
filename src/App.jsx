@@ -5,7 +5,7 @@ import SyncIndicator from './components/SyncIndicator';
 import TenantSelector from './components/TenantSelector';
 import { TenantProvider } from './context/TenantContext';
 import { Menu, Sun, Moon } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { backend, isBackendConfigured } from './backendClient';
 
 // Importar Vistas
 import Dashboard from './views/Dashboard';
@@ -36,7 +36,7 @@ export default function App() {
     return savedTheme || 'dark'; // Por defecto: oscuro
   });
 
-  // Cargar sesión inicial o iniciar con sesión nula si Supabase está configurado (forzar autenticación)
+  // Cargar sesión inicial o iniciar con sesión nula si hay servidor configurado (forzar autenticación)
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('meal_user_session');
     if (saved) {
@@ -47,7 +47,7 @@ export default function App() {
       }
     }
     // Si la conexión real está configurada, obligamos a autenticar en blanco
-    if (isSupabaseConfigured) {
+    if (isBackendConfigured) {
       return null;
     }
     // Modo demo local sin conexión real: autologueamos un oficial de campo
@@ -76,13 +76,13 @@ export default function App() {
 
   // Pilar 2 (DevSecOps): Gestión de tokens y verificación remota de roles en el arranque
   useEffect(() => {
-    if (isSupabaseConfigured) {
-      // 1. Validar el token y la sesión real en Supabase
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
+    if (isBackendConfigured) {
+      // 1. Validar el token y la sesión real en el servidor central
+      backend.auth.getSession().then(async ({ data: { session } }) => {
         if (session && session.user) {
           try {
             // Consultar el rol verídico en la tabla profiles del servidor central
-            const { data: profile, error } = await supabase
+            const { data: profile, error } = await backend
               .from('profiles')
               .select('role')
               .eq('id', session.user.id)
@@ -116,14 +116,14 @@ export default function App() {
             localStorage.removeItem('meal_user_session');
           }
         } else {
-          // Si no hay sesión válida en Supabase, limpiamos cualquier residuo local
+          // Si no hay sesión válida en el servidor, limpiamos cualquier residuo local
           setCurrentUser(null);
           localStorage.removeItem('meal_user_session');
         }
       });
 
       // 2. Escuchar cambios de estado en la autenticación (ej: cierres de sesión remotos)
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const { data: { subscription } } = backend.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
           localStorage.removeItem('meal_user_session');
@@ -143,11 +143,11 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      if (isSupabaseConfigured) {
-        await supabase.auth.signOut();
+      if (isBackendConfigured) {
+        await backend.auth.signOut();
       }
     } catch (e) {
-      console.error('Error cerrando sesión en Supabase:', e);
+      console.error('Error cerrando sesión en el servidor:', e);
     }
     setCurrentUser(null);
     localStorage.removeItem('meal_user_session');

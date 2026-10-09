@@ -400,57 +400,7 @@ export const tenantWayuu = {
       campoBase('responsabilidades_aliado', 'Compromisos principales del aliado', 'texto'),
       campoBase('documento_soporte', 'Acuerdo o carta de intención (PDF)', 'documento')
     ])
-  ],
-
-  feedbacks: [
-    {
-      id: 'fb-wayuu-101',
-      project_id: PROJ_ID,
-      unidad_id: 'unit-wayuu-mayapo',
-      category: 'complaint',
-      canal: 'presencial',
-      nivel: 'amarillo',
-      estado: 'recibida',
-      details: 'Pescadores de la zona norte de Mayapo reportan que la marea alta ha socavado los postes de amarre y solicitan priorizar el estudio de geolocalización de puntos de embarque.',
-      contact_info: 'Líder Gelasio Uriana, Cel: 312-445588',
-      status: 'pending',
-      severity: 'medium',
-      is_confidential: false,
-      response_text: null,
-      created_at: '2026-06-25T10:00:00.000Z'
-    },
-    {
-      id: 'fb-wayuu-102',
-      project_id: PROJ_ID,
-      unidad_id: 'unit-wayuu-elpajaro',
-      category: 'complaint',
-      canal: 'anonimo',
-      nivel: 'naranja',
-      estado: 'clasificada',
-      details: 'Reporte confidencial: Se detectaron sospechas de favoritismo familiar en la pre-asignación del kit de cavas de frío en la ranchería de El Pájaro.',
-      contact_info: 'Pescador anónimo de El Pájaro',
-      status: 'under_review',
-      severity: 'high',
-      is_confidential: true,
-      response_text: null,
-      created_at: '2026-06-26T09:00:00.000Z'
-    }
-  ],
-
-  lessons: [
-    {
-      id: 'll-wayuu-101',
-      project_id: PROJ_ID,
-      title: 'Estandarización de tarifas netas para el canal B2B',
-      description: 'Durante la operación piloto de la Ruta Ancestral Jemeilli, se evidenció que las agencias mayoristas exigen tarifas netas fijas anualizadas con comisiones del 20% y seguros de accidentes.',
-      challenges: 'Las asociaciones comunitarias cambiaban los costos de los almuerzos semanalmente según el precio de mercado, rompiendo reservas de agencias.',
-      recommendations: 'Establecer acuerdos de costos fijos estacionales por semestre con las asociaciones y contratar pólizas colectivas anuales.',
-      action_plan: {
-        description: 'Redactar acuerdo firmado de tarifas fijas para almuerzos con la cooperativa de Mayapo.',
-        responsible: 'Coordinador Territorial MEAL',
-        deadline: '2026-07-15',
-        status: 'pending'
-      }
-    }
   ]
+  // Sin PQRS ni lecciones aprendidas de ejemplo: el seed es solo
+  // configuración. Los datos operativos los captura el equipo en la app.
 };

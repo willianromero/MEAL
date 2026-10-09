@@ -10,6 +10,11 @@ descritas en el Documento Rector Técnico (DRT v2.0).
 | `migrations/001_schema.sql` | Esquema completo (diccionario 7.2 del DRT): tenants, membresías, catálogos, formularios, registros de campo, evidencias, indicadores, PQRS, bitácora. |
 | `migrations/002_rls.sql` | Aislamiento multi-tenant con Row-Level Security + políticas por rol + bucket de evidencias segregado por tenant. |
 | `migrations/003_audit_triggers.sql` | Triggers de bitácora automática, congelación de línea base, inmutabilidad de registros/evidencias, separación de funciones y consentimiento obligatorio. |
+| `migrations/004`–`007` | Edición/archivado de configuración, suspensión real de tenants, endurecimiento de permisos y bloqueo de auto-promoción al crear el perfil. |
+
+> **Neon:** estas mismas migraciones (001 en adelante) más el seed se convierten
+> en un único `neon/instalacion_neon.sql` con `npm run gen:neon`. Ver
+> `docs/MIGRACION_NEON.md`.
 
 ## Cómo aplicar
 
