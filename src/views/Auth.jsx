@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase, isSupabaseConfigured } from '../supabaseClient';
+import { backend, isBackendConfigured, backendKind, backendLabel, changePassword, friendlyAuthError } from '../backendClient';
 import { Shield, Key, AlertCircle, Check, Users, Database, HelpCircle, EyeOff } from 'lucide-react';
 
 export default function Auth({ currentUser, setCurrentUser }) {
@@ -9,14 +9,19 @@ export default function Auth({ currentUser, setCurrentUser }) {
   const [message, setMessage] = useState(null);
   const [isError, setIsError] = useState(false);
 
+  // 'login' o 'signup' (crear cuenta: queda sin acceso hasta que el
+  // administrador le asigne proyecto y rol, ver docs/MIGRACION_NEON.md)
+  const [mode, setMode] = useState('login');
+
   // Control de cambio de contraseña
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [pwError, setPwError] = useState(null);
   const [pwSuccess, setPwSuccess] = useState(null);
   const [isLoadingPw, setIsLoadingPw] = useState(false);
 
   // Controlar si mostramos el panel de simulación de roles locales
-  const [showSimulator, setShowSimulator] = useState(!isSupabaseConfigured);
+  const [showSimulator, setShowSimulator] = useState(!isBackendConfigured);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -29,7 +34,7 @@ export default function Auth({ currentUser, setCurrentUser }) {
     setMessage(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await backend.auth.signInWithPassword({
         email,
         password
       });
@@ -37,7 +42,7 @@ export default function Auth({ currentUser, setCurrentUser }) {
       if (error) throw error;
 
       if (data && data.user) {
-        const { data: profile, error: profError } = await supabase
+        const { data: profile, error: profError } = await backend
           .from('profiles')
           .select('role')
           .eq('id', data.user.id)
@@ -67,7 +72,37 @@ export default function Auth({ currentUser, setCurrentUser }) {
       }
     } catch (err) {
       console.error(err);
-      showMessage(err.message || 'Error al iniciar sesión', true);
+      showMessage(friendlyAuthError(err) || 'Error al iniciar sesión', true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    if (!email || !password) {
+      showMessage('Por favor completa todos los campos', true);
+      return;
+    }
+    if (password.length < 8) {
+      showMessage('La contraseña debe tener al menos 8 caracteres.', true);
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage(null);
+    try {
+      const { error } = await backend.auth.signUp({ email, password });
+      if (error) throw error;
+      // La cuenta nueva no tiene proyecto ni rol: se cierra la sesión que abre
+      // el registro y se explica el siguiente paso.
+      await backend.auth.signOut().catch(() => {});
+      setMode('login');
+      setPassword('');
+      showMessage(`Cuenta creada para ${email}. El administrador debe asignarte un proyecto y un rol; después inicia sesión.`, false);
+    } catch (err) {
+      console.error(err);
+      showMessage(friendlyAuthError(err), true);
     } finally {
       setIsLoading(false);
     }
@@ -78,16 +113,16 @@ export default function Auth({ currentUser, setCurrentUser }) {
     setPwError(null);
     setPwSuccess(null);
 
-    if (newPassword.length < 6) {
-      setPwError('La contraseña debe tener al menos 6 caracteres.');
+    if (newPassword.length < 8) {
+      setPwError('La contraseña debe tener al menos 8 caracteres.');
       return;
     }
 
     setIsLoadingPw(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
-      setPwSuccess('¡Contraseña actualizada con éxito en Supabase!');
+      await changePassword({ currentPassword, newPassword });
+      setPwSuccess('¡Contraseña actualizada con éxito!');
+      setCurrentPassword('');
       setNewPassword('');
     } catch (err) {
       console.error('Error al actualizar contraseña:', err);
@@ -133,7 +168,7 @@ export default function Auth({ currentUser, setCurrentUser }) {
   const handleLogout = async () => {
     setIsLoading(true);
     try {
-      await supabase.auth.signOut();
+      await backend.auth.signOut();
     } catch (e) {
       console.error(e);
     }
@@ -156,18 +191,18 @@ export default function Auth({ currentUser, setCurrentUser }) {
         <div>
           <h1>Portal de Acceso</h1>
           <p>
-            {isSupabaseConfigured 
-              ? 'Conéctate de forma segura al servidor central de Supabase en producción.' 
+            {isBackendConfigured 
+              ? `Conéctate de forma segura al servidor central (${backendLabel}).`  
               : 'Sección de inicio de sesión del sistema MEAL.'}
           </p>
         </div>
 
         <span 
-          className={`badge ${isSupabaseConfigured ? 'badge-success' : 'badge-warning'}`}
+          className={`badge ${isBackendConfigured ? 'badge-success' : 'badge-warning'}`}
           style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.4rem 0.8rem' }}
         >
           <Database size={12} />
-          {isSupabaseConfigured ? 'Conectado a la Nube' : 'Modo Demo Local'}
+          {isBackendConfigured ? 'Conectado a la Nube' : 'Modo Demo Local'}
         </span>
       </div>
 
@@ -233,8 +268,8 @@ export default function Auth({ currentUser, setCurrentUser }) {
             </ul>
           </div>
 
-          {/* Formulario de Cambio de Contraseña (Supabase real) (Pilar 2) */}
-          {isSupabaseConfigured && !currentUser.email.endsWith('@meal.org') && (
+          {/* Formulario de Cambio de Contraseña (servidor real) (Pilar 2) */}
+          {isBackendConfigured && !currentUser.email.endsWith('@meal.org') && (
             <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '1.25rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <h3 style={{ fontSize: '0.95rem', margin: 0, color: 'var(--primary-light)' }}>Actualizar Contraseña</h3>
               
@@ -245,13 +280,24 @@ export default function Auth({ currentUser, setCurrentUser }) {
                 <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'bold' }}>{pwSuccess}</span>
               )}
 
-              <form onSubmit={handleUpdatePassword} style={{ display: 'flex', gap: '0.5rem' }}>
-                <input 
+              <form onSubmit={handleUpdatePassword} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {backendKind === 'neon' && (
+                  <input
+                    type="password"
+                    placeholder="Contraseña actual"
+                    value={currentPassword}
+                    onChange={e => setCurrentPassword(e.target.value)}
+                    style={{ fontSize: '0.8rem', padding: '0.4rem', flex: 1, minWidth: '140px' }}
+                    required
+                    disabled={isLoadingPw}
+                  />
+                )}
+                <input
                   type="password"
-                  placeholder="Nueva contraseña (mínimo 6 caracteres)"
+                  placeholder="Nueva contraseña (mínimo 8 caracteres)"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
-                  style={{ fontSize: '0.8rem', padding: '0.4rem', flex: 1 }}
+                  style={{ fontSize: '0.8rem', padding: '0.4rem', flex: 1, minWidth: '140px' }}
                   required
                   disabled={isLoadingPw}
                 />
@@ -274,18 +320,20 @@ export default function Auth({ currentUser, setCurrentUser }) {
       ) : (
         /* VISTA LOGIN */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* 1. Formulario Autenticación Real de Supabase */}
+          {/* 1. Formulario de autenticación real contra el servidor central */}
           <div className="glass-panel" style={{ padding: '2rem' }}>
             <h2 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Key size={22} style={{ color: 'var(--primary-light)' }} /> Acceso con Cuenta de Supabase
+              <Key size={22} style={{ color: 'var(--primary-light)' }} /> {mode === 'signup' ? 'Crear Cuenta' : 'Acceso con tu Cuenta'}
             </h2>
             <p style={{ fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-              {isSupabaseConfigured 
-                ? 'Ingresa el correo electrónico y la contraseña que registraste en la base de datos.' 
-                : 'La base de datos remota no está configurada. La sesión real requiere configurar variables de entorno.'}
+              {!isBackendConfigured
+                ? 'La base de datos remota no está configurada. La sesión real requiere configurar variables de entorno.'
+                : mode === 'signup'
+                  ? 'Crea tu cuenta con tu correo. Quedará sin acceso hasta que el administrador te asigne un proyecto y un rol.'
+                  : 'Ingresa el correo electrónico y la contraseña de tu cuenta.'}
             </p>
 
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <form onSubmit={mode === 'signup' ? handleSignUp : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group">
                 <label>Correo Electrónico</label>
                 <input 
@@ -293,7 +341,7 @@ export default function Auth({ currentUser, setCurrentUser }) {
                   placeholder="useradmin@wayuu.org" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  disabled={!isSupabaseConfigured || isLoading}
+                  disabled={!isBackendConfigured || isLoading}
                 />
               </div>
 
@@ -304,22 +352,34 @@ export default function Auth({ currentUser, setCurrentUser }) {
                   placeholder="••••••••" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={!isSupabaseConfigured || isLoading}
+                  disabled={!isBackendConfigured || isLoading}
                 />
               </div>
 
               <button 
                 type="submit" 
                 className="btn btn-primary" 
-                disabled={!isSupabaseConfigured || isLoading}
+                disabled={!isBackendConfigured || isLoading}
                 style={{ marginTop: '0.5rem' }}
               >
-                {isLoading ? 'Conectando...' : 'Iniciar Sesión en el Servidor'}
+                {isLoading ? 'Conectando...' : mode === 'signup' ? 'Crear Cuenta' : 'Iniciar Sesión en el Servidor'}
               </button>
             </form>
+
+            {isBackendConfigured && (
+              <button
+                type="button"
+                onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null); }}
+                className="btn btn-secondary"
+                style={{ marginTop: '0.75rem', width: '100%', fontSize: '0.8rem' }}
+                disabled={isLoading}
+              >
+                {mode === 'signup' ? 'Ya tengo cuenta: iniciar sesión' : '¿Primera vez? Crear cuenta'}
+              </button>
+            )}
           </div>
 
-          {/* 2. Acordeón / Panel de Simulación (Oculto por defecto si Supabase está activo) */}
+          {/* 2. Acordeón / Panel de Simulación (Oculto por defecto si hay servidor configurado) */}
           <div className="glass-panel" style={{ padding: '1.5rem 2rem' }}>
             <div className="flex-between">
               <h2 style={{ fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>

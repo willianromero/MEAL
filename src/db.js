@@ -139,10 +139,33 @@ export async function logAudit({ tenantId, actorId, actorEmail, accion, entidad,
   return addWithSignature(db.audit_log, entry);
 }
 
+// --- ÉPOCA DE LOS DATOS LOCALES ---
+// Cambiar este valor borra UNA sola vez, en cada dispositivo, todo lo guardado
+// localmente (incluido lo pendiente de sincronizar) y se vuelve a sembrar la
+// configuración. Solo debe cambiarse cuando todo lo capturado antes es
+// descartable. 2026-10: arranque limpio en Neon; lo capturado contra el
+// Supabase de desarrollo era de prueba y no debe subirse a producción.
+export const LOCAL_DATA_EPOCH = '2026-10-neon';
+
+export async function resetLocalDataIfNewEpoch() {
+  // Una sola transacción sobre todas las tablas: si la app arranca dos veces
+  // en paralelo (p. ej. React StrictMode), la segunda ya ve la época nueva.
+  return db.transaction('rw', db.tables, async () => {
+    const meta = await db.sync_meta.get('data_epoch');
+    if (meta?.value === LOCAL_DATA_EPOCH) return false;
+    for (const table of db.tables) await table.clear();
+    await db.sync_meta.put({ key: 'data_epoch', value: LOCAL_DATA_EPOCH });
+    console.log(`Datos locales reiniciados (época ${LOCAL_DATA_EPOCH}).`);
+    return true;
+  });
+}
+
 // --- SEMBRADO POR CONFIGURACIÓN DE TENANT (DRT: "configuración, no código") ---
 // Cada tenant es un archivo de configuración en src/seeds/. Dar de alta un
 // proyecto nuevo = agregar configuración, sin tocar la lógica de la plataforma.
 export async function seedLocalData() {
+  await resetLocalDataIfNewEpoch();
+
   const { TENANT_SEEDS } = await import('./seeds/index.js');
   const { seedTenantConfig } = await import('./seeds/seedEngine.js');
 

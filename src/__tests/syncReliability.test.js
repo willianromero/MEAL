@@ -38,14 +38,15 @@ vi.mock('../db', () => {
 });
 
 const upsertMock = vi.fn(async () => ({ error: null }));
-vi.mock('../supabaseClient', () => ({
-  isSupabaseConfigured: true,
-  supabase: {
+vi.mock('../backendClient', () => ({
+  isBackendConfigured: true,
+  hasActiveSession: async () => true,
+  uploadEvidence: async () => {},
+  backend: {
     from: () => ({
       upsert: upsertMock,
       select: () => ({ gt: async () => ({ data: [], error: null }) })
-    }),
-    storage: null
+    })
   }
 }));
 

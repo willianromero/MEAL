@@ -1,5 +1,5 @@
 import { db, putWithSignature, logAudit } from '../db';
-import { supabase, isSupabaseConfigured } from '../supabaseClient';
+import { backend, isBackendConfigured } from '../backendClient';
 import { updatePendingCount } from '../syncEngine';
 
 // ============================================================================
@@ -51,18 +51,18 @@ export function restoreRecord(table, store, record, ctx) {
 }
 
 // Borrado definitivo (DRT: reservado a admin). Es una acción EN LÍNEA: borra en
-// Dexie y en Supabase. Sin conexión se bloquea (usar archivar). Ante error de
+// Dexie y en el servidor. Sin conexión se bloquea (usar archivar). Ante error de
 // llave foránea (tiene hijos/referencias), avisa para archivar o borrar primero.
 export async function hardDelete(table, store, record, ctx) {
   const online = navigator.onLine && !(ctx?.isSimulatedOffline);
-  if (isSupabaseConfigured && !online) {
+  if (isBackendConfigured && !online) {
     const err = new Error('El borrado definitivo requiere conexión. Sin conexión, usa "Archivar".');
     err.code = 'OFFLINE';
     throw err;
   }
 
-  if (isSupabaseConfigured) {
-    const { error } = await supabase.from(table).delete().eq('id', record.id);
+  if (isBackendConfigured) {
+    const { error } = await backend.from(table).delete().eq('id', record.id);
     if (error) {
       // 23503 = violación de llave foránea (tiene dependencias)
       if (error.code === '23503' || /foreign key/i.test(error.message || '')) {

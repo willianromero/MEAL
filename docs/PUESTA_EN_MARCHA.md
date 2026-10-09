@@ -1,5 +1,10 @@
 # Puesta en marcha — Guía paso a paso (a prueba de errores)
 
+> **Octubre 2026: el backend de producción pasó a Neon.** Para montar o
+> recuperar la plataforma sigue [`MIGRACION_NEON.md`](MIGRACION_NEON.md).
+> Esta guía queda para instalaciones con **Supabase** (p. ej. autoalojado en
+> Colombia con `deploy/docker-compose.yml`).
+
 Esta guía es para **ti** (no requiere programar). Cubre todo lo que falta para
 llevar la Plataforma MEAL a producción: aplicar la base de datos, crear el
 primer usuario, conectar la app y probarla.
@@ -21,7 +26,7 @@ Antes de empezar, consigue estos 3 accesos y anótalos:
 3. El archivo **`D:\MEAL\.env`** (lo crearemos/editaremos en la Parte E).
 
 Ten abierto el **Explorador de archivos de Windows** en `D:\MEAL\supabase\migrations\`.
-Verás 7 archivos:
+Verás 8 archivos:
 - `000_reset.sql`  ← solo si tu Supabase ya tenía tablas de una versión anterior
 - `001_schema.sql`
 - `002_rls.sql`
@@ -29,6 +34,7 @@ Verás 7 archivos:
 - `004_config_edit.sql`  ← habilita editar/archivar/eliminar configuración desde la app
 - `005_tenant_suspend.sql`  ← hace que "Suspender" un proyecto bloquee de verdad el acceso
 - `006_security_hardening.sql`  ← cierra 3 brechas de permisos encontradas en auditoría general
+- `007_profiles_insert_fix.sql`  ← impide que una cuenta recién registrada se cree su perfil como Administrador de Plataforma
 
 > **Nota:** si ya tenías la base montada de antes, basta con aplicar el nuevo
 > `006_security_hardening.sql` (SQL Editor → pegar → Run). Cierra: (1) el

@@ -1,5 +1,5 @@
 import { db, calculateRecordHash } from './db';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { backend, isBackendConfigured, hasActiveSession, uploadEvidence } from './backendClient';
 
 // Tablas sincronizables con el backend, en orden de dependencia (FKs).
 // Toda tabla lleva tenant_id (RF-TEN-2) y sync_status indexado.
@@ -139,6 +139,13 @@ export async function triggerSync() {
     console.log('[Sync Engine] Sincronización omitida: el sistema está offline.');
     return;
   }
+  // Sin sesión el servidor rechaza todo (RLS / Data API): no tiene sentido
+  // intentarlo y marcaría como 'error' registros que están bien. Lo pendiente
+  // espera en el dispositivo y sube al iniciar sesión.
+  if (!(await hasActiveSession())) {
+    console.log('[Sync Engine] Sincronización omitida: no hay sesión iniciada.');
+    return;
+  }
 
   let hasLock = false;
   const nowMs = Date.now();
@@ -180,11 +187,11 @@ export async function triggerSync() {
     const lastSyncedStr = metaRecord ? metaRecord.value : '1970-01-01T00:00:00.000Z';
     const currentSyncStart = new Date().toISOString();
 
-    // 1. PUSH: Enviar escrituras locales offline a Supabase
+    // 1. PUSH: Enviar escrituras locales offline al servidor central
     await pushLocalChanges();
 
     // 2. PULL: Descargar cambios remotos ocurridos desde la última sincronización
-    if (isSupabaseConfigured) {
+    if (isBackendConfigured) {
       await pullRemoteChanges(lastSyncedStr);
     }
 
@@ -242,7 +249,7 @@ async function pushLocalChanges() {
       delete cleanRecord.sync_status;
       stripFields.forEach(f => delete cleanRecord[f]);
       try {
-        await withBackoff(() => supabase.from(name).upsert(cleanRecord));
+        await withBackoff(() => backend.from(name).upsert(cleanRecord));
         // Las evidencias suben su binario al almacén de objetos por separado (8.3)
         if (name === 'evidences' && record.blob) {
           await uploadEvidenceBlob(record);
@@ -256,14 +263,16 @@ async function pushLocalChanges() {
   }
 }
 
-// Subida diferida del binario de una evidencia al bucket segregado por tenant.
+// Subida diferida del binario de una evidencia al almacén segregado por tenant
+// (bucket de Supabase o Netlify Blobs con Neon, según backendClient).
 async function uploadEvidenceBlob(evidence) {
-  if (!isSupabaseConfigured || !supabase.storage) return; // en modo mock no hay almacén
+  if (!isBackendConfigured) return; // en modo demo no hay almacén
   const path = `${evidence.tenant_id}/${evidence.registro_id}/${evidence.id}.jpg`;
-  const { error } = await supabase.storage.from('evidencias').upload(path, evidence.blob, {
-    contentType: evidence.mime || 'image/jpeg', upsert: true
-  });
-  if (error) throw new Error(`Fallo subida de evidencia: ${error.message}`);
+  try {
+    await uploadEvidence(path, evidence.blob, evidence.mime || 'image/jpeg');
+  } catch (err) {
+    throw new Error(`Fallo subida de evidencia: ${err.message}`);
+  }
   await db.evidences.update(evidence.id, { url_objeto: path });
 }
 
@@ -290,7 +299,7 @@ export function shouldRemoteOverwriteLocal(localRecord, remoteRecord, tableName)
 async function pullRemoteChanges(lastSyncedStr) {
   for (const { name, store } of SYNC_TABLES) {
     const table = store();
-    const { data, error } = await supabase
+    const { data, error } = await backend
       .from(name)
       .select('*')
       .gt('updated_at', lastSyncedStr);

@@ -15,7 +15,8 @@ costos de licenciamiento.
 |---|---|---|
 | App de campo / panel web | **React 19 PWA** (Vite) instalable en Android | Captura offline, cámara y GPS con APIs web estándar (RNF-10) |
 | BD local offline | **Dexie / IndexedDB** (esquema v2 multi-tenant) | Fuente primaria en campo; cola de sync idempotente por UUID |
-| Backend | **Supabase autoalojable** (PostgreSQL 15 + PostGIS + RLS, Storage S3, Auth JWT) | Open source, residencia de datos en Colombia (Ley 1581/2012) |
+| Backend (producción) | **Neon** (PostgreSQL + PostGIS + RLS, Data API, Neon Auth) + **Netlify Blobs** para fotos | No se pausa por inactividad (Supabase gratuito sí). Guía: `docs/MIGRACION_NEON.md` |
+| Backend (alternativa) | **Supabase autoalojable** (PostgreSQL + PostGIS + RLS, Storage S3, Auth JWT) | Open source, para residencia de datos en Colombia (Ley 1581/2012) |
 | Sync alterno | **WebRTC P2P** en LAN sin internet | Fusión firmada entre dispositivos en campo |
 | Integridad | **SHA-256** por registro + bitácora append-only | Todo indicador reconstruible desde datos crudos (RNF-8) |
 
@@ -52,15 +53,29 @@ npm test           # vitest — incluye el gate de aislamiento multi-tenant
 npm run build      # PWA de producción en dist/
 ```
 
-Variables de entorno (`.env`) para conectar el backend:
+Variables de entorno (`.env.local`, y en Netlify → Environment variables) para
+conectar el backend (ver `.env.example`):
 
 ```bash
+# Neon (recomendado; si están, tienen prioridad)
+VITE_NEON_AUTH_URL=https://ep-xxxx.neonauth.<región>.aws.neon.tech/neondb/auth
+VITE_NEON_DATA_API_URL=https://ep-xxxx.apirest.<región>.aws.neon.tech/neondb/rest/v1
+# Supabase (alternativa / autoalojado)
 VITE_SUPABASE_URL=https://<tu-instancia>
 VITE_SUPABASE_ANON_KEY=<anon-key>
 ```
 
 Sin estas variables la app opera en **modo demo local** (sembrado de los 3 tenants
 y simulador de roles en la pantalla de acceso).
+
+## Backend en Neon (producción actual)
+
+`docs/MIGRACION_NEON.md` es la guía paso a paso. Resumen: habilitar Data API +
+Neon Auth, pegar `neon/instalacion_neon.sql` en el SQL Editor (generado con
+`npm run gen:neon` desde `supabase/migrations/` + seed), definir las dos
+variables `VITE_NEON_*` en Netlify y desplegar desde GitHub (`netlify.toml`
+publica la función `netlify/functions/evidencias.mjs`, que guarda las fotos en
+Netlify Blobs con la misma regla por tenant que el bucket de Supabase).
 
 ## Backend y despliegue autoalojado
 
@@ -107,5 +122,6 @@ Código, datos y documentación pertenecen a la Fundación / convenio. La vista
 ## Documentación
 
 - `docs/MANUAL_USUARIO.md` — flujos por rol (gestor, coordinador, director, admin).
+- `docs/MIGRACION_NEON.md` — puesta en marcha del backend en Neon (producción).
 - `supabase/README.md` — migraciones y garantías del backend.
 - Documento rector: *DRT v2.0 — Plataforma MEAL multi-proyecto* (fuente única de verdad técnica).

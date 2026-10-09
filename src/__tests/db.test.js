@@ -20,8 +20,9 @@ vi.mock('dexie', () => {
     const rows = new Map();
     return {
       _rows: rows,
-      add: vi.fn(async (r) => { rows.set(r.id, r); return r.id; }),
-      put: vi.fn(async (r) => { rows.set(r.id, r); return r.id; }),
+      // sync_meta usa `key` como llave primaria; el resto de tablas, `id`
+      add: vi.fn(async (r) => { rows.set(r.id ?? r.key, r); return r.id ?? r.key; }),
+      put: vi.fn(async (r) => { rows.set(r.id ?? r.key, r); return r.id ?? r.key; }),
       bulkAdd: vi.fn(async (arr) => { arr.forEach(r => rows.set(r.id, r)); }),
       bulkPut: vi.fn(async (arr) => { arr.forEach(r => rows.set(r.id, r)); }),
       get: vi.fn(async (id) => rows.get(id) || null),
@@ -44,12 +45,14 @@ vi.mock('dexie', () => {
       };
       this.version = vi.fn(() => versionChain);
       names.forEach(name => { this[name] = mkTable(); });
+      this.tables = names.map(name => this[name]);
+      this.transaction = vi.fn(async (_mode, _tables, fn) => fn());
     }
   }
   return { default: MockDexie, Dexie: MockDexie };
 });
 
-import { db, seedLocalData, calculateRecordHash, logAudit } from '../db';
+import { db, seedLocalData, calculateRecordHash, logAudit, LOCAL_DATA_EPOCH } from '../db';
 
 describe('Base de datos local multi-tenant (Dexie v2 mock)', () => {
   beforeEach(() => {
@@ -108,6 +111,34 @@ describe('Base de datos local multi-tenant (Dexie v2 mock)', () => {
     await seedLocalData();
     const tenant = db.tenants._rows.get('ten-wayuu');
     expect(tenant.signature).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('Borra UNA vez los datos locales de una época anterior (datos de prueba) y re-siembra', async () => {
+    await db.sync_meta.put({ key: 'data_epoch', value: 'epoca-vieja' });
+    await db.field_records.put({ id: 'fr-prueba', tenant_id: 'ten-hocol', sync_status: 'error' });
+    await db.feedbacks.put({ id: 'fb-prueba', tenant_id: 'ten-wayuu', sync_status: 'synced' });
+
+    await seedLocalData();
+
+    expect(db.field_records._rows.has('fr-prueba')).toBe(false);
+    expect(db.feedbacks._rows.size).toBe(0);
+    expect(db.tenants._rows.size).toBe(3);
+    expect(db.sync_meta._rows.get('data_epoch').value).toBe(LOCAL_DATA_EPOCH);
+  });
+
+  it('No borra nada si el dispositivo ya está en la época actual', async () => {
+    await seedLocalData();
+    await db.field_records.put({ id: 'fr-real', tenant_id: 'ten-hocol', sync_status: 'pending_sync' });
+
+    await seedLocalData();
+
+    expect(db.field_records._rows.has('fr-real')).toBe(true);
+  });
+
+  it('El seed es solo configuración: no siembra PQRS ni lecciones de ejemplo', async () => {
+    await seedLocalData();
+    expect(db.feedbacks._rows.size).toBe(0);
+    expect(db.lessons_learned._rows.size).toBe(0);
   });
 
   it('logAudit debería crear una entrada firmada en la bitácora', async () => {
